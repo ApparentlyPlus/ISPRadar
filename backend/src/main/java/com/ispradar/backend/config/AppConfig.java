@@ -1,5 +1,6 @@
 package com.ispradar.backend.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
@@ -11,13 +12,11 @@ import java.util.concurrent.Executors;
 @Configuration
 public class AppConfig {
 
-    // Thread pool for handling concurrent fetching
     @Bean(destroyMethod = "shutdownNow")
     public ExecutorService ispExecutor() {
         return Executors.newFixedThreadPool(8);
     }
 
-    // CORS configuration to allow frontend access
     @Bean
     public WebMvcConfigurer corsConfigurer() {
         return new WebMvcConfigurer() {
@@ -28,5 +27,10 @@ public class AppConfig {
                         .allowedMethods("GET", "POST", "OPTIONS");
             }
         };
+    }
+
+    @Bean
+    public ObjectMapper objectMapper() {
+        return new ObjectMapper();
     }
 }
