@@ -1,0 +1,305 @@
+package com.ispradar.backend.service;
+
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import com.ispradar.backend.dto.Plan;
+
+import java.io.IOException;
+import java.net.*;
+import java.net.http.*;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReentrantLock;
+
+@Slf4j
+@Service
+public class VodafoneService {
+
+    // ── Constants ─────────────────────────────────────────────────────────────
+
+    private static final String BASE       = "https://www.vodafone.gr";
+    private static final String HOME       = BASE + "/statheri-internet-programmata";
+    private static final String GEO_API    = BASE + "/api/geographicAddress";
+    private static final String AVAIL_API  = BASE + "/api/eligibilityTool/queryServiceQualification";
+    private static final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36";
+
+    // JSONPath filter param keys used by Vodafone's geo API
+    private static final String PARAM_STATE    = "externalIdentifier[?(externalIdentifierType==\"stateOrProvince\")].id";
+    private static final String PARAM_CITY     = "externalIdentifier[?(externalIdentifierType==\"city\")].id";
+    private static final String FIELDS_STATE   = "stateOrProvince," + PARAM_STATE;
+    private static final String FIELDS_CITY    = "city," + PARAM_CITY;
+    private static final String FIELDS_POSTAL  = "postcode";
+    private static final String FIELDS_STREET  = "streetName";
+    private static final String FIELDS_NUMBER  = "streetNr,streetNrSuffix";
+
+    // ── HTTP session ──────────────────────────────────────────────────────────
+
+    private final CookieManager cookieManager;
+    private final HttpClient     httpClient;
+    private final ObjectMapper   objectMapper;
+    private final AtomicBoolean  sessionReady = new AtomicBoolean(false);
+    private final ReentrantLock  sessionLock  = new ReentrantLock();
+
+    public VodafoneService(ObjectMapper objectMapper) {
+        this.objectMapper  = objectMapper;
+        this.cookieManager = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
+        this.httpClient    = HttpClient.newBuilder()
+                .cookieHandler(cookieManager)
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .connectTimeout(Duration.ofSeconds(15))
+                .build();
+    }
+
+    private void doInit() throws IOException, InterruptedException {
+        log.info("[Vodafone] Initialising session...");
+        // Visit homepage with browser-like Accept header (WAF bypass)
+        HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(HOME))
+                .timeout(Duration.ofSeconds(15))
+                .header("User-Agent",      USER_AGENT)
+                .header("Accept",          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+                .header("sec-fetch-mode",  "navigate")
+                .header("sec-fetch-site",  "none")
+                .GET().build();
+        HttpResponse<String> r = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+        if (r.statusCode() >= 400)
+            throw new IOException("Vodafone session init failed: HTTP " + r.statusCode());
+        log.info("[Vodafone] Session ready");
+    }
+
+    private void ensureSession() {
+        if (sessionReady.get()) return;
+        sessionLock.lock();
+        try {
+            if (!sessionReady.get()) { doInit(); sessionReady.set(true); }
+        } catch (Exception e) {
+            throw new RuntimeException("Vodafone session init failed", e);
+        } finally {
+            sessionLock.unlock();
+        }
+    }
+
+    private void resetSession() {
+        sessionLock.lock();
+        try {
+            log.warn("[Vodafone] Resetting session...");
+            sessionReady.set(false);
+            cookieManager.getCookieStore().removeAll();
+            doInit();
+            sessionReady.set(true);
+        } catch (Exception e) {
+            throw new RuntimeException("Vodafone session reset failed", e);
+        } finally {
+            sessionLock.unlock();
+        }
+    }
+
+    // ── URI builder ───────────────────────────────────────────────────────────
+
+    /**
+     * Builds the geo API URI with properly encoded params.
+     * Python's requests encodes both keys and values — we replicate that.
+     */
+    private URI buildGeoUri(Map<String, String> params) {
+        StringBuilder sb = new StringBuilder(GEO_API).append("?");
+        boolean first = true;
+        for (Map.Entry<String, String> e : params.entrySet()) {
+            if (!first) sb.append("&");
+            first = false;
+            sb.append(URLEncoder.encode(e.getKey(),   StandardCharsets.UTF_8));
+            sb.append("=");
+            sb.append(URLEncoder.encode(e.getValue(), StandardCharsets.UTF_8));
+        }
+        return URI.create(sb.toString());
+    }
+
+    private HttpRequest buildApiGet(URI uri) {
+        return HttpRequest.newBuilder()
+                .uri(uri)
+                .timeout(Duration.ofSeconds(10))
+                .header("User-Agent",      USER_AGENT)
+                .header("Accept",          "application/json, text/plain, */*")
+                .header("sec-fetch-mode",  "cors")
+                .header("sec-fetch-site",  "same-origin")
+                .GET().build();
+    }
+
+    // ── Internal fetch ────────────────────────────────────────────────────────
+
+    /**
+     * Calls Vodafone's geo API and returns {label → full-item-map}.
+     * Returns empty map on 404 (no data for that level — same as Python).
+     */
+    private Map<String, Map<String, Object>> fetchOptions(Map<String, String> params)
+            throws IOException, InterruptedException {
+        ensureSession();
+        URI uri = buildGeoUri(params);
+        HttpResponse<String> resp = httpClient.send(buildApiGet(uri), HttpResponse.BodyHandlers.ofString());
+
+        if (resp.statusCode() == 404) return Collections.emptyMap();
+        if (resp.statusCode() == 403 || resp.statusCode() == 302) {
+            resetSession();
+            resp = httpClient.send(buildApiGet(uri), HttpResponse.BodyHandlers.ofString());
+        }
+        if (resp.statusCode() != 200)
+            throw new IOException("Vodafone geo API error: HTTP " + resp.statusCode());
+
+        List<Map<String, Object>> items = objectMapper.readValue(resp.body(), new TypeReference<>() {});
+        Map<String, Map<String, Object>> result = new LinkedHashMap<>();
+        for (Map<String, Object> item : items) {
+            String label = ((String) item.getOrDefault("label", "")).strip();
+            if (!label.isEmpty()) result.put(label, item);
+        }
+        return result;
+    }
+
+    // ── Public API (called by orchestrator) ───────────────────────────────────
+
+    /** Step 1 — prefectures/states. */
+    public Map<String, Map<String, Object>> fetchStates() throws IOException, InterruptedException {
+        return fetchOptions(Map.of("fields", FIELDS_STATE));
+    }
+
+    /** Step 2 — cities. */
+    public Map<String, Map<String, Object>> fetchCities(Map<String, Object> stateCtx)
+            throws IOException, InterruptedException {
+        return fetchOptions(Map.of(
+                "fields",     FIELDS_CITY,
+                PARAM_STATE,  (String) stateCtx.get("value")));
+    }
+
+    /** Step 3 — postal codes. */
+    public Map<String, Map<String, Object>> fetchPostalCodes(
+            Map<String, Object> stateCtx,
+            Map<String, Object> cityCtx) throws IOException, InterruptedException {
+        return fetchOptions(Map.of(
+                "fields",    FIELDS_POSTAL,
+                PARAM_STATE, (String) stateCtx.get("value"),
+                PARAM_CITY,  (String) cityCtx.get("value")));
+    }
+
+    /** Step 4 — street names. */
+    public Map<String, Map<String, Object>> fetchStreets(
+            Map<String, Object> stateCtx,
+            Map<String, Object> cityCtx,
+            Map<String, Object> postalCtx) throws IOException, InterruptedException {
+        return fetchOptions(Map.of(
+                "fields",    FIELDS_STREET,
+                PARAM_STATE, (String) stateCtx.get("value"),
+                PARAM_CITY,  (String) cityCtx.get("value"),
+                "postcode",  (String) postalCtx.get("value")));
+    }
+
+    /** Step 5 — street numbers. */
+    public Map<String, Map<String, Object>> fetchNumbers(
+            Map<String, Object> stateCtx,
+            Map<String, Object> cityCtx,
+            Map<String, Object> postalCtx,
+            Map<String, Object> streetCtx) throws IOException, InterruptedException {
+        return fetchOptions(Map.of(
+                "fields",      FIELDS_NUMBER,
+                PARAM_STATE,   (String) stateCtx.get("value"),
+                PARAM_CITY,    (String) cityCtx.get("value"),
+                "postcode",    (String) postalCtx.get("value"),
+                "streetName",  (String) streetCtx.get("value")));
+    }
+
+    /** Step 6 — final availability POST. */
+    @SuppressWarnings("unchecked")
+    public List<Plan> checkAvailability(
+            Map<String, Object> stateCtx,
+            Map<String, Object> cityCtx,
+            Map<String, Object> postalCtx,
+            Map<String, Object> streetCtx,
+            Map<String, Object> numberCtx) throws IOException, InterruptedException {
+
+        ensureSession();
+        String json = buildCheckPayload(stateCtx, cityCtx, postalCtx, streetCtx, numberCtx, null);
+        HttpResponse<String> resp = sendCheckRequest(json);
+
+        if (resp.statusCode() == 403) { resetSession(); resp = sendCheckRequest(json); }
+
+        Map<String, Object> data = objectMapper.readValue(resp.body(), new TypeReference<>() {});
+
+        // Handle floor edge-case (same as Python)
+        if ("showFloorDropdown".equals(data.get("renderScenario"))) {
+            log.info("[Vodafone] Floor dropdown required — defaulting to ground floor");
+            Map<String, Object> floor = Map.of("label", "Ισόγειο", "value", "O00");
+            String retryJson = buildCheckPayload(stateCtx, cityCtx, postalCtx, streetCtx, numberCtx, floor);
+            resp = sendCheckRequest(retryJson);
+            data = objectMapper.readValue(resp.body(), new TypeReference<>() {});
+        }
+
+        return parseVodafonePlans(data);
+    }
+
+    private HttpResponse<String> sendCheckRequest(String jsonBody) throws IOException, InterruptedException {
+        HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(AVAIL_API))
+                .timeout(Duration.ofSeconds(15))
+                .header("User-Agent",    USER_AGENT)
+                .header("Content-Type",  "application/json")
+                .header("Accept",        "application/json, */*")
+                .header("sec-fetch-mode","cors")
+                .header("sec-fetch-site","same-origin")
+                .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+                .build();
+        return httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+    }
+
+    private String buildCheckPayload(
+            Map<String, Object> stateCtx,
+            Map<String, Object> cityCtx,
+            Map<String, Object> postalCtx,
+            Map<String, Object> streetCtx,
+            Map<String, Object> numberCtx,
+            Map<String, Object> floor) throws IOException {
+
+        Map<String, Object> address = new LinkedHashMap<>();
+        address.put("stateOrProvince", stateCtx);
+        address.put("city",            cityCtx);
+        address.put("postcode",        postalCtx);
+        address.put("streetName",      streetCtx);
+        address.put("streetNrSuffix",  numberCtx);
+
+        Map<String, Object> requestBody = new LinkedHashMap<>();
+        requestBody.put("address", address);
+        if (floor != null) requestBody.put("buildingDetails", Map.of("floor", floor));
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("customerType", "Retail");
+        payload.put("requestBody",  requestBody);
+        payload.put("searchCriteria", "byAddress");
+        payload.put("providerData", Map.of(
+                "providers",                  Map.of("COSMOTE", "OTE", "VODAFONE", "VODAFONE"),
+                "multipleBuildingsErrorCodes",List.of("FTTH_ELIGIBILITY_ERR_005","FTTH_ELIGIBILITY_ERR_006"),
+                "allHiddenPrograms",          List.of("VDSL_30"),
+                "businessHidenPrograms",      List.of("ADSL")));
+        payload.put("isFirstCheck", floor == null);
+
+        return objectMapper.writeValueAsString(payload);
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Plan> parseVodafonePlans(Map<String, Object> data) {
+        List<Plan> plans = new ArrayList<>();
+        List<Map<String, Object>> speeds =
+                (List<Map<String, Object>>) data.getOrDefault("availableSpeeds", List.of());
+        for (Map<String, Object> plan : speeds) {
+            String name = (String) plan.getOrDefault("name", "Unknown Package");
+            Map<String, Object> s = (Map<String, Object>) plan.getOrDefault("speeds", Map.of());
+            plans.add(new Plan("VODAFONE", name, toDouble(s.get("maxPromisedSpeedDownload")),
+                                                  toDouble(s.get("maxPromisedSpeedUpload"))));
+        }
+        return plans;
+    }
+
+    private Double toDouble(Object v) {
+        if (v == null) return null;
+        try { return Double.parseDouble(v.toString()); } catch (NumberFormatException e) { return null; }
+    }
+}
