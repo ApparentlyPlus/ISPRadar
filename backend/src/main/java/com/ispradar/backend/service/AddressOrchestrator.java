@@ -1,31 +1,39 @@
 package com.ispradar.backend.service;
 
-import com.ispradar.backend.dto.*;
-import lombok.extern.slf4j.Slf4j;
+import com.ispradar.backend.dto.AddressItem;
+import com.ispradar.backend.dto.AddressResponse;
+import com.ispradar.backend.dto.AvailabilityRequest;
+import com.ispradar.backend.dto.AvailabilityResponse;
+import com.ispradar.backend.dto.Plan;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.text.Normalizer;
-import java.util.*;
-import java.util.concurrent.*;
-import java.util.function.Supplier;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 
-@Slf4j
 @Service
 public class AddressOrchestrator {
 
-    private final CosmoteService   cosmote;
-    private final VodafoneService  vodafone;
-    private final ExecutorService  executor;
+    private static final Logger LOG = LoggerFactory.getLogger(AddressOrchestrator.class);
 
-    public AddressOrchestrator(CosmoteService cosmote,
-                               VodafoneService vodafone,
-                               ExecutorService ispExecutor) {
-        this.cosmote  = cosmote;
+    private final CosmoteService cosmote;
+    private final VodafoneService vodafone;
+    private final ExecutorService executor;
+
+    public AddressOrchestrator(CosmoteService cosmote, VodafoneService vodafone, ExecutorService ispExecutor) {
+        this.cosmote = cosmote;
         this.vodafone = vodafone;
         this.executor = ispExecutor;
     }
-
-    // ── Steps ─────────────────────────────────────────────────────────────────
 
     public AddressResponse getStates() {
         var c = runAsync(cosmote::fetchStates);
@@ -34,72 +42,72 @@ public class AddressOrchestrator {
     }
 
     public AddressResponse getMunicipalities(AddressItem state) {
-        var c = state.cosmoteCtx()  != null
+        var c = state != null && state.cosmoteCtx() != null
                 ? runAsync(() -> cosmote.fetchMunicipalities(state.cosmoteCtx()))
                 : done();
-        var v = state.vodafoneCtx() != null
+        var v = state != null && state.vodafoneCtx() != null
                 ? runAsync(() -> vodafone.fetchCities(state.vodafoneCtx()))
                 : done();
         return merge(await(c), await(v));
     }
 
-    /**
-     * Vodafone requires postal code; Cosmote does not.
-     * The frontend calls this after municipality and uses the results
-     * to populate the postal code dropdown (Vodafone only).
-     */
     public AddressResponse getPostalCodes(AddressItem state, AddressItem municipality) {
-        if (state.vodafoneCtx() == null || municipality.vodafoneCtx() == null)
+        if (state == null || municipality == null
+                || state.vodafoneCtx() == null || municipality.vodafoneCtx() == null) {
             return empty();
+        }
         var v = runAsync(() -> vodafone.fetchPostalCodes(state.vodafoneCtx(), municipality.vodafoneCtx()));
         return merge(Map.of(), await(v));
     }
 
-    /**
-     * Streets — both providers queried in parallel.
-     * postalCode may be null if Vodafone data is unavailable at this address.
-     */
     public AddressResponse getStreets(AddressItem state, AddressItem municipality, AddressItem postalCode) {
-        var c = municipality.cosmoteCtx() != null
+        var c = municipality != null && municipality.cosmoteCtx() != null
                 ? runAsync(() -> cosmote.fetchStreets(municipality.cosmoteCtx()))
                 : done();
-        var v = (state.vodafoneCtx() != null && municipality.vodafoneCtx() != null && postalCode != null)
-                ? runAsync(() -> vodafone.fetchStreets(state.vodafoneCtx(), municipality.vodafoneCtx(), postalCode.vodafoneCtx()))
+        Map<String, Object> postalCtx = vodafoneCtxFrom(postalCode);
+        var v = state != null && municipality != null && postalCtx != null
+            && state.vodafoneCtx() != null && municipality.vodafoneCtx() != null
+            ? runAsync(() -> vodafone.fetchStreets(state.vodafoneCtx(), municipality.vodafoneCtx(), postalCtx))
                 : done();
         return merge(await(c), await(v));
     }
 
-    /** Areas — Cosmote only. */
     public AddressResponse getAreas(AddressItem street) {
-        if (street.cosmoteCtx() == null) return empty();
+        if (street == null || street.cosmoteCtx() == null) return empty();
         var c = runAsync(() -> cosmote.fetchAreas(street.cosmoteCtx()));
         return merge(await(c), Map.of());
     }
 
-    /** Street numbers — Vodafone only (Cosmote uses free-text). */
     public AddressResponse getNumbers(AddressItem state, AddressItem municipality,
                                       AddressItem postalCode, AddressItem street) {
-        if (state.vodafoneCtx() == null || municipality.vodafoneCtx() == null
-                || postalCode == null || street.vodafoneCtx() == null)
+        if (state == null || municipality == null || postalCode == null || street == null
+                || state.vodafoneCtx() == null || municipality.vodafoneCtx() == null
+            || street.vodafoneCtx() == null) {
             return empty();
+        }
+        Map<String, Object> postalCtx = vodafoneCtxFrom(postalCode);
+        if (postalCtx == null) return empty();
         var v = runAsync(() -> vodafone.fetchNumbers(
-                state.vodafoneCtx(), municipality.vodafoneCtx(),
-                postalCode.vodafoneCtx(), street.vodafoneCtx()));
+            state.vodafoneCtx(), municipality.vodafoneCtx(),
+            postalCtx, street.vodafoneCtx()));
         return merge(Map.of(), await(v));
     }
 
-    /** Final check — both providers run in parallel; partial failures are non-fatal. */
     public AvailabilityResponse checkAvailability(AvailabilityRequest req) {
-        List<Plan>   plans  = Collections.synchronizedList(new ArrayList<>());
+        List<Plan> plans = Collections.synchronizedList(new ArrayList<>());
         List<String> errors = Collections.synchronizedList(new ArrayList<>());
-
         List<CompletableFuture<Void>> futures = new ArrayList<>();
 
-        // ── Cosmote ──────────────────────────────────────────────────────────
-        if (req.state().cosmoteCtx() != null
+        if (req != null
+                && req.state() != null
+                && req.municipality() != null
                 && req.area() != null
-                && req.street().cosmoteCtx() != null
-                && req.number() != null && !req.number().isBlank()) {
+                && req.street() != null
+                && req.number() != null && !req.number().isBlank()
+                && req.state().cosmoteCtx() != null
+                && req.municipality().cosmoteCtx() != null
+                && req.area().cosmoteCtx() != null
+                && req.street().cosmoteCtx() != null) {
             futures.add(CompletableFuture.runAsync(() -> {
                 try {
                     plans.addAll(cosmote.checkAvailability(
@@ -109,68 +117,66 @@ public class AddressOrchestrator {
                             req.street().cosmoteCtx(),
                             req.number()));
                 } catch (Exception e) {
-                    log.error("[Cosmote] check failed", e);
+                    LOG.error("[Cosmote] check failed", e);
                     errors.add("COSMOTE: " + e.getMessage());
                 }
             }, executor));
         }
 
-        // ── Vodafone ─────────────────────────────────────────────────────────
-        if (req.state().vodafoneCtx() != null
+        if (req != null
+                && req.state() != null
+                && req.municipality() != null
                 && req.postalCode() != null
-                && req.street().vodafoneCtx() != null
-                && req.numberItem() != null
-                && req.numberItem().vodafoneCtx() != null) {
+                && req.street() != null
+                && req.state().vodafoneCtx() != null
+                && req.municipality().vodafoneCtx() != null
+                && req.street().vodafoneCtx() != null) {
+            Map<String, Object> postalCtx = vodafoneCtxFrom(req.postalCode());
+            Map<String, Object> tmpNumberCtx = vodafoneCtxFrom(req.numberItem());
+            if (tmpNumberCtx == null && req.number() != null && !req.number().isBlank()) {
+                tmpNumberCtx = Map.of("label", req.number(), "value", req.number());
+            }
+            if (postalCtx != null && tmpNumberCtx != null) {
+                final Map<String, Object> numberCtx = tmpNumberCtx;
             futures.add(CompletableFuture.runAsync(() -> {
                 try {
                     plans.addAll(vodafone.checkAvailability(
                             req.state().vodafoneCtx(),
                             req.municipality().vodafoneCtx(),
-                            req.postalCode().vodafoneCtx(),
+                            postalCtx,
                             req.street().vodafoneCtx(),
-                            req.numberItem().vodafoneCtx()));
+                            numberCtx));
                 } catch (Exception e) {
-                    log.error("[Vodafone] check failed", e);
+                    LOG.error("[Vodafone] check failed", e);
                     errors.add("VODAFONE: " + e.getMessage());
                 }
             }, executor));
+            }
         }
 
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-
-        String address = buildAddressLabel(req);
-        return new AvailabilityResponse(address, new ArrayList<>(plans), new ArrayList<>(errors));
+        return new AvailabilityResponse(buildAddressLabel(req), new ArrayList<>(plans), new ArrayList<>(errors));
     }
 
-    // ── Merge ─────────────────────────────────────────────────────────────────
-
-    /**
-     * Deduplicates Cosmote + Vodafone results by normalised label.
-     * Items present in both providers carry both context blobs.
-     * Results are sorted alphabetically.
-     */
     private AddressResponse merge(
             Map<String, Map<String, Object>> cosmoteMap,
             Map<String, Map<String, Object>> vodafoneMap) {
 
-        // Precompute normalised keys for Vodafone map
         Map<String, Map<String, Object>> vodafoneNorm = new LinkedHashMap<>();
         vodafoneMap.forEach((label, ctx) -> vodafoneNorm.put(normalize(label), ctx));
 
         Map<String, AddressItem> merged = new LinkedHashMap<>();
-
-        // Seed with Cosmote entries, attach Vodafone ctx if label matches
         cosmoteMap.forEach((label, cCtx) -> {
-            String key    = normalize(label);
+            String key = normalize(label);
             Map<String, Object> vCtx = vodafoneNorm.get(key);
             merged.put(key, new AddressItem(label, cCtx, vCtx));
         });
 
-        // Add Vodafone-only entries (not already seeded from Cosmote)
         vodafoneMap.forEach((label, vCtx) -> {
             String key = normalize(label);
-            if (!merged.containsKey(key))
+            if (!merged.containsKey(key)) {
                 merged.put(key, new AddressItem(label, null, vCtx));
+            }
         });
 
         List<AddressItem> sorted = merged.values().stream()
@@ -180,25 +186,23 @@ public class AddressOrchestrator {
         return new AddressResponse(sorted);
     }
 
-    /**
-     * Greek-aware normalisation: uppercase + strip tonos.
-     * Handles "ΑΘΉΝΑ" == "ΑΘΗΝΑ", "Αθήνα" == "ΑΘΗΝΑ", etc.
-     */
     private static String normalize(String s) {
-        String up  = s.toUpperCase(java.util.Locale.forLanguageTag("el")).strip();
-        String nfd = Normalizer.normalize(up, Normalizer.Form.NFD);
-        return nfd.replaceAll("\\p{InCombiningDiacriticalMarks}", "");
+        String up = s.toUpperCase(Locale.forLanguageTag("el")).strip();
+        String noPrefix = up.replaceFirst("^(Ν\\.|Ν)\\s+", "")
+            .replaceFirst("^(Δ\\.|Δ)\\s+", "");
+        String noParens = noPrefix.replaceAll("\\s*\\([^)]*\\)", "");
+        String nfd = Normalizer.normalize(noParens, Normalizer.Form.NFD);
+        String noTones = nfd.replaceAll("\\p{InCombiningDiacriticalMarks}", "");
+        return noTones.replaceAll("\\s+", " ").strip();
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private <T> CompletableFuture<Map<String, Map<String, Object>>> runAsync(
-            CheckedSupplier<Map<String, Map<String, Object>>> supplier) {
+    private CompletableFuture<Map<String, Map<String, Object>>> runAsync(CheckedSupplier supplier) {
         return CompletableFuture.supplyAsync(() -> {
-            try { return supplier.get(); }
-            catch (Exception e) {
-                log.error("Provider fetch failed", e);
-                return Map.of();   // graceful degradation
+            try {
+                return supplier.get();
+            } catch (Exception e) {
+                LOG.error("Provider fetch failed", e);
+                return Map.of();
             }
         }, executor);
     }
@@ -211,19 +215,29 @@ public class AddressOrchestrator {
         return f.join();
     }
 
-    private AddressResponse empty() { return new AddressResponse(List.of()); }
+    private AddressResponse empty() {
+        return new AddressResponse(List.of());
+    }
+
+    private Map<String, Object> vodafoneCtxFrom(AddressItem item) {
+        if (item == null) return null;
+        if (item.vodafoneCtx() != null) return item.vodafoneCtx();
+        if (item.label() == null || item.label().isBlank()) return null;
+        return Map.of("label", item.label(), "value", item.label());
+    }
 
     private String buildAddressLabel(AvailabilityRequest req) {
-        String street = req.street()  != null ? req.street().label()       : "";
-        String num    = req.number()  != null && !req.number().isBlank()
-                        ? req.number()
-                        : (req.numberItem() != null ? req.numberItem().label() : "");
-        String city   = req.municipality() != null ? req.municipality().label() : "";
+        if (req == null) return "";
+        String street = req.street() != null ? req.street().label() : "";
+        String num = req.number() != null && !req.number().isBlank()
+                ? req.number()
+                : (req.numberItem() != null ? req.numberItem().label() : "");
+        String city = req.municipality() != null ? req.municipality().label() : "";
         return (street + " " + num + ", " + city).strip();
     }
 
     @FunctionalInterface
-    interface CheckedSupplier<T> {
-        T get() throws Exception;
+    interface CheckedSupplier {
+        Map<String, Map<String, Object>> get() throws Exception;
     }
 }
