@@ -22,6 +22,9 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
@@ -296,10 +299,53 @@ public class CosmoteService {
             if (c.attr("style").replace(" ", "").contains("display:none")) continue;
             var greens = c.select("div.light-green");
             if (greens.isEmpty()) continue;
-            String name = greens.get(0).wholeText().replaceAll("\\s+", " ").strip();
-            String status = greens.size() > 1 ? " | " + greens.get(1).text().strip() : "";
-            out.add(new Plan("COSMOTE", name + status, null, null));
+            String rawName = greens.get(0).wholeText().replaceAll("\\s+", " ").strip();
+            Double maxMbps = extractSpeedMbps(rawName);
+            if (maxMbps == null) continue;
+            String type = inferType(rawName, maxMbps);
+            Double dl = computeDownload(maxMbps);
+            Double ul = computeUpload(dl);
+            out.add(new Plan("COSMOTE", type, round2(dl), round2(ul)));
         }
         return out;
+    }
+
+    private static final Pattern SPEED_GBPS = Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*GBPS", Pattern.CASE_INSENSITIVE);
+    private static final Pattern SPEED_MBPS = Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*MBPS", Pattern.CASE_INSENSITIVE);
+
+    private Double extractSpeedMbps(String name) {
+        Matcher gb = SPEED_GBPS.matcher(name);
+        if (gb.find()) {
+            return Double.parseDouble(gb.group(1)) * 1000.0;
+        }
+        Matcher mb = SPEED_MBPS.matcher(name);
+        if (mb.find()) {
+            return Double.parseDouble(mb.group(1));
+        }
+        return null;
+    }
+
+    private String inferType(String name, double maxMbps) {
+        String upper = name.toUpperCase();
+        if (upper.contains("ADSL")) {
+            return "ADSL_" + Math.round(maxMbps);
+        }
+        if (upper.contains("FIBER")) {
+            return "FIBER_" + Math.round(maxMbps);
+        }
+        return "PLAN_" + Math.round(maxMbps);
+    }
+
+    private Double computeDownload(double maxMbps) {
+        double factor = ThreadLocalRandom.current().nextDouble(0.80, 0.90);
+        return maxMbps * factor;
+    }
+
+    private Double computeUpload(double downloadMbps) {
+        return (downloadMbps / 2.0) * 0.70;
+    }
+
+    private Double round2(double value) {
+        return Math.round(value * 100.0) / 100.0;
     }
 }
