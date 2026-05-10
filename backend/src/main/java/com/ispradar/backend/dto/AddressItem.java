@@ -10,5 +10,6 @@ import java.util.Map;
 public record AddressItem(
         String label,
         Map<String, Object> cosmoteCtx,
-        Map<String, Object> vodafoneCtx
+        Map<String, Object> vodafoneCtx,
+        Map<String, Object> novaCtx
 ) {}
