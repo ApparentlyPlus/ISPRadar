@@ -27,18 +27,21 @@ public class AddressOrchestrator {
 
     private final CosmoteService cosmote;
     private final VodafoneService vodafone;
+    private final NovaService nova;
     private final ExecutorService executor;
 
-    public AddressOrchestrator(CosmoteService cosmote, VodafoneService vodafone, ExecutorService ispExecutor) {
+    public AddressOrchestrator(CosmoteService cosmote, VodafoneService vodafone, NovaService nova, ExecutorService ispExecutor) {
         this.cosmote = cosmote;
         this.vodafone = vodafone;
+        this.nova = nova;
         this.executor = ispExecutor;
     }
 
     public AddressResponse getStates() {
         var c = runAsync(cosmote::fetchStates);
         var v = runAsync(vodafone::fetchStates);
-        return merge(await(c), await(v));
+        var n = runAsync(nova::fetchStates);
+        return merge(await(c), await(v), await(n));
     }
 
     public AddressResponse getMunicipalities(AddressItem state) {
@@ -48,7 +51,9 @@ public class AddressOrchestrator {
         var v = state != null && state.vodafoneCtx() != null
                 ? runAsync(() -> vodafone.fetchCities(state.vodafoneCtx()))
                 : done();
-        return merge(await(c), await(v));
+        var n = state != null && state.novaCtx() != null
+                ? runAsync(() -> nova.fetchMunicipalities(state.novaCtx())) : done();
+        return merge(await(c), await(v), await(n));
     }
 
     public AddressResponse getPostalCodes(AddressItem state, AddressItem municipality) {
@@ -57,7 +62,7 @@ public class AddressOrchestrator {
             return empty();
         }
         var v = runAsync(() -> vodafone.fetchPostalCodes(state.vodafoneCtx(), municipality.vodafoneCtx()));
-        return merge(Map.of(), await(v));
+        return merge(Map.of(), await(v), Map.of());
     }
 
     public AddressResponse getStreets(AddressItem state, AddressItem municipality, AddressItem postalCode) {
@@ -69,13 +74,17 @@ public class AddressOrchestrator {
             && state.vodafoneCtx() != null && municipality.vodafoneCtx() != null
             ? runAsync(() -> vodafone.fetchStreets(state.vodafoneCtx(), municipality.vodafoneCtx(), postalCtx))
                 : done();
-        return merge(await(c), await(v));
+        var n = state != null && municipality != null 
+                && state.novaCtx() != null && municipality.novaCtx() != null
+                ? runAsync(() -> nova.fetchStreets(state.novaCtx(), municipality.novaCtx())) : done();
+                
+        return merge(await(c), await(v), await(n));
     }
 
     public AddressResponse getAreas(AddressItem street) {
         if (street == null || street.cosmoteCtx() == null) return empty();
         var c = runAsync(() -> cosmote.fetchAreas(street.cosmoteCtx()));
-        return merge(await(c), Map.of());
+        return merge(await(c), Map.of(), Map.of());
     }
 
     public AddressResponse getNumbers(AddressItem state, AddressItem municipality,
@@ -90,7 +99,7 @@ public class AddressOrchestrator {
         var v = runAsync(() -> vodafone.fetchNumbers(
             state.vodafoneCtx(), municipality.vodafoneCtx(),
             postalCtx, street.vodafoneCtx()));
-        return merge(Map.of(), await(v));
+        return merge(Map.of(), await(v), Map.of());
     }
 
     public AvailabilityResponse checkAvailability(AvailabilityRequest req) {
@@ -154,28 +163,61 @@ public class AddressOrchestrator {
             }
         }
 
+        if (req != null 
+                && req.state() != null 
+                && req.municipality() != null 
+                && req.street() != null
+                && req.number() != null 
+                && !req.number().isBlank()
+                && req.state().novaCtx() != null
+                && req.municipality().novaCtx() != null
+                && req.street().novaCtx() != null) {
+            futures.add(CompletableFuture.runAsync(() -> {
+                try {
+                    plans.addAll(nova.checkAvailability(
+                            req.state().novaCtx(), req.municipality().novaCtx(),
+                            req.street().novaCtx(), req.number()));
+                } catch (Exception e) {
+                    LOG.error("[Nova] check failed", e);
+                    errors.add("NOVA: " + e.getMessage());
+                }
+            }, executor));
+        }
+
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
         return new AvailabilityResponse(buildAddressLabel(req), new ArrayList<>(plans), new ArrayList<>(errors));
     }
 
     private AddressResponse merge(
             Map<String, Map<String, Object>> cosmoteMap,
-            Map<String, Map<String, Object>> vodafoneMap) {
+            Map<String, Map<String, Object>> vodafoneMap,
+            Map<String, Map<String, Object>> novaMap) {
 
         Map<String, Map<String, Object>> vodafoneNorm = new LinkedHashMap<>();
         vodafoneMap.forEach((label, ctx) -> vodafoneNorm.put(normalize(label), ctx));
+
+        Map<String, Map<String, Object>> novaNorm = new LinkedHashMap<>();
+        novaMap.forEach((label, ctx) -> novaNorm.put(normalize(label), ctx));
 
         Map<String, AddressItem> merged = new LinkedHashMap<>();
         cosmoteMap.forEach((label, cCtx) -> {
             String key = normalize(label);
             Map<String, Object> vCtx = vodafoneNorm.get(key);
-            merged.put(key, new AddressItem(label, cCtx, vCtx));
+            Map<String, Object> nCtx = novaNorm.get(key);
+            merged.put(key, new AddressItem(label, cCtx, vCtx, nCtx));
         });
 
         vodafoneMap.forEach((label, vCtx) -> {
             String key = normalize(label);
             if (!merged.containsKey(key)) {
-                merged.put(key, new AddressItem(label, null, vCtx));
+                merged.put(key, new AddressItem(label, null, vCtx, novaNorm.get(key)));
+            }
+        });
+
+        novaMap.forEach((label, nCtx) -> {
+            String key = normalize(label);
+            if (!merged.containsKey(key)) {
+                merged.put(key, new AddressItem(label, null, null, nCtx));
             }
         });
 
