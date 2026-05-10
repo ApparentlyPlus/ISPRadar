@@ -213,34 +213,35 @@ public class NovaService {
 
     private Map<String, Object> buildAvailabilityPayload(
             Map<String, Object> stateCtx, Map<String, Object> munCtx, 
-            Map<String, Object> streetCtx, String number) {
-
+            Map<String, Object> streetCtx, String number) 
+    {
         Map<String, Object> payload = new LinkedHashMap<>();
         
-        payload.put("packagePreselected", Map.of(
-                "code", "2P_FIBER_100", 
-                "title", "Fiber 100", 
-                "price", "29.0"));
-                
-        payload.put("packageSelected", Map.of(
-                "code", "", "title", "", "price", null, "packageGroupType", ""));
-                
-        payload.put("customerInfo", Map.of(
-                "isNewCustomer", true, 
-                "isExistingCustomerMoving", false, 
-                "landlineNumber", ""));
-                
+        payload.put("packagePreselected", Map.of("code", "2P_FIBER_100", "title", "Fiber 100", "price", "29.0"));
+        
+        // FIX: Create a LinkedHashMap to safely store the null value for "price"
+        Map<String, Object> packageSelected = new LinkedHashMap<>();
+        packageSelected.put("code", "");
+        packageSelected.put("title", "");
+        packageSelected.put("price", null);
+        packageSelected.put("packageGroupType", "");
+        payload.put("packageSelected", packageSelected);
+        
+        payload.put("customerInfo", Map.of("isNewCustomer", true, "isExistingCustomerMoving", false, "landlineNumber", ""));
+        
         payload.put("address", Map.of(
                 "region", stateCtx.get("region"),
                 "municipality", munCtx.get("municipality"),
                 "city", streetCtx.get("city"),
                 "street", streetCtx.get("street"),
                 "zipcode", streetCtx.get("zipcode"),
-                "streetNumber", number));
-                
+                "streetNumber", number
+        ));
+        
         payload.put("userType", "Postpaid");
         payload.put("fixedPackagesType", "TwoP");
-        payload.put("eligibleFixedPackagesType", null);
+        
+        payload.put("eligibleFixedPackagesType", null); 
 
         return payload;
     }
@@ -249,19 +250,81 @@ public class NovaService {
     private List<Plan> parseNovaPlans(Map<String, Object> data) {
         List<Plan> plans = new ArrayList<>();
         Map<String, Object> result = (Map<String, Object>) data.getOrDefault("result", Map.of());
-        List<Map<String, Object>> packages = (List<Map<String, Object>>) result.get("packages");
+        
+        // 1. Map actual speeds retrieved from the Eligibility API payloads
+        Map<Double, Double> speedMap = new HashMap<>();
+        List<Map<String, Object>> eligibilityResponse = 
+                (List<Map<String, Object>>) result.getOrDefault("eligibilityResponse", List.of());
+        
+        if (eligibilityResponse != null) {
+            for (Map<String, Object> er : eligibilityResponse) {
+                // Priority 1: Explicit mapping from `profiles` array
+                List<Map<String, Object>> profiles = 
+                        (List<Map<String, Object>>) er.getOrDefault("profiles", List.of());
+                if (profiles != null) {
+                    for (Map<String, Object> profile : profiles) {
+                        try {
+                            Double dl = Double.parseDouble(String.valueOf(profile.get("maxDownloadSpeed")));
+                            Double ul = Double.parseDouble(String.valueOf(profile.get("maxUploadSpeed")));
+                            speedMap.put(dl, ul);
+                        } catch (Exception e) {
+                            // Ignored formatting issues
+                        }
+                    }
+                }
+                
+                // Priority 2: Fallback for VDSL/ADSL using `profileTariffs` syntax (e.g. "50_5" or "24_1")
+                List<Map<String, Object>> profileTariffs = 
+                        (List<Map<String, Object>>) er.getOrDefault("profileTariffs", List.of());
+                if (profileTariffs != null) {
+                    for (Map<String, Object> pt : profileTariffs) {
+                        try {
+                            String profStr = (String) pt.get("profile");
+                            if (profStr != null && profStr.contains("_")) {
+                                String[] parts = profStr.split("_");
+                                if (parts.length >= 2) {
+                                    Double dl = Double.parseDouble(parts[0]);
+                                    Double ul = Double.parseDouble(parts[1]);
+                                    speedMap.putIfAbsent(dl, ul); // Don't override explicit profile mappings
+                                }
+                            }
+                        } catch (Exception e) {
+                            // Ignored formatting issues
+                        }
+                    }
+                }
+            }
+        }
 
+        // 2. Iterate through packages and apply mapped speeds
+        List<Map<String, Object>> packages = (List<Map<String, Object>>) result.get("packages");
         if (packages != null) {
             Pattern speedPattern = Pattern.compile("(\\d+)");
+            
             for (Map<String, Object> pkg : packages) {
-                String title = (String) pkg.getOrDefault("title", "NOVA Unknown");
+                String title = (String) pkg.getOrDefault("title", "Unknown Package");
                 Double maxDl = null;
                 Double maxUl = null;
                 
                 Matcher m = speedPattern.matcher(title);
-                if (m.find()) {
-                    maxDl = Double.parseDouble(m.group(1));
-                    maxUl = maxDl / 10.0;
+                while (m.find()) {
+                    Double parsed = Double.parseDouble(m.group(1));
+                    
+                    // We check if this number exists in our parsed speed map 
+                    // This prevents us from matching numbers like "2" from "2play"
+                    if (speedMap.containsKey(parsed)) {
+                        maxDl = parsed;
+                        maxUl = speedMap.get(maxDl);
+                    } 
+                    // Fallback to the first reasonable internet speed number (>= 24) just in case
+                    else if (maxDl == null && parsed >= 24) {
+                        maxDl = parsed;
+                    }
+                }
+                
+                // Final fallback if the map didn't contain the upload speed
+                if (maxDl != null && maxUl == null) {
+                    maxUl = maxDl / 10.0; // Typical rate
                 }
                 
                 plans.add(new Plan("NOVA", title, maxDl, maxUl));
