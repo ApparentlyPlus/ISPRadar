@@ -204,6 +204,8 @@ public class NovaService {
 
         HttpResponse<String> resp = session.httpClient.send(req, HttpResponse.BodyHandlers.ofString());
         if (resp.statusCode() != 200) {
+            LOG.error("[Nova] Availability HTTP {}. Payload: {}", resp.statusCode(), jsonBody);
+            LOG.error("[Nova] Availability response body: {}", resp.body());
             throw new IOException("Nova availability check error: HTTP " + resp.statusCode());
         }
 
@@ -219,7 +221,7 @@ public class NovaService {
         
         payload.put("packagePreselected", Map.of("code", "2P_FIBER_100", "title", "Fiber 100", "price", "29.0"));
         
-        // FIX: Create a LinkedHashMap to safely store the null value for "price"
+        // Create a LinkedHashMap to safely store the null value for "price"
         Map<String, Object> packageSelected = new LinkedHashMap<>();
         packageSelected.put("code", "");
         packageSelected.put("title", "");
