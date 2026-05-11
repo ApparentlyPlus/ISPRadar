@@ -95,7 +95,7 @@ public class NovaService {
                 .timeout(Duration.ofSeconds(15))
                 .header("User-Agent", USER_AGENT)
                 .header("Accept", "application/json, text/plain, */*")
-                .header("Referer", "https://www.vodafone.gr/statheri-internet-programmata")
+                .header("Referer", "https://nova.gr/statheri-tilefonia/programmata/stathero-internet")
                 .header("sec-fetch-mode", "cors")
                 .header("sec-fetch-site", "same-origin");
     }
