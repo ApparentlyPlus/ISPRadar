@@ -110,6 +110,8 @@ public class VodafoneService {
                 .header("Accept", "application/json, text/plain, */*")
                 .header("sec-fetch-mode", "cors")
                 .header("sec-fetch-site", "same-origin")
+                .header("accept-language", "el")
+                .header("Referer", "https://www.vodafone.gr/statheri-internet-programmata")
                 .GET()
                 .build();
     }
@@ -263,6 +265,7 @@ public class VodafoneService {
         payload.put("providerData", Map.of(
                 "providers", Map.of("COSMOTE", "OTE", "VODAFONE", "VODAFONE"),
                 "multipleBuildingsErrorCodes", List.of("FTTH_ELIGIBILITY_ERR_005", "FTTH_ELIGIBILITY_ERR_006"),
+                "multipleBuildingsErrorMessages", List.of("Πολλαπλά κτήρια. Παρακαλούμε καταχωρήστε συντεταγμένες", "???????????????? ????????????. ?????????????????????? ?????????????????????? ??????????????????????????", "Μη αναμενόμενο error !"),
                 "allHiddenPrograms", List.of("VDSL_30"),
                 "businessHidenPrograms", List.of("ADSL")));
         payload.put("isFirstCheck", floor == null);
