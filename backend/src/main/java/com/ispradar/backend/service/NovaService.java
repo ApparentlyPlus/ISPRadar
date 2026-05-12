@@ -204,8 +204,6 @@ public class NovaService {
 
         HttpResponse<String> resp = session.httpClient.send(req, HttpResponse.BodyHandlers.ofString());
         if (resp.statusCode() != 200) {
-            LOG.error("[Nova] Availability HTTP {}. Payload: {}", resp.statusCode(), jsonBody);
-            LOG.error("[Nova] Availability response body: {}", resp.body());
             throw new IOException("Nova availability check error: HTTP " + resp.statusCode());
         }
 
