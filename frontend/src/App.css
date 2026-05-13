@@ -1,11 +1,11 @@
 .app-container {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
   width: 100%;
   background: var(--bg);
   position: relative;
-  overflow-x: hidden;
+  overflow: hidden;
 }
 
 /* Subtle background glow effect */
@@ -106,7 +106,9 @@
   margin: 0 auto;
   padding: 40px 20px;
   z-index: 10;
-  align-items: start;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .glass-panel {
@@ -266,6 +268,9 @@
   display: flex;
   flex-direction: column;
   gap: 24px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .right-search-container {
@@ -282,6 +287,9 @@
   display: flex;
   flex-direction: column;
   gap: 20px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .results-header {
@@ -319,9 +327,12 @@
 .results-scroll-container {
   display: flex;
   flex-direction: column;
-  max-height: 600px;
+  gap: 16px;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 12px;
+  flex: 1;
+  min-height: 0;
 }
 
 .results-scroll-container::-webkit-scrollbar {
