@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import SearchForm from './components/SearchForm';
 import ResultCard from './components/ResultCard';
+import ParticlesBackground from './components/ParticlesBackground';
 import './styles/globals.css';
 import './App.css';
 
@@ -109,6 +110,7 @@ function App() {
 
   return (
     <div className={`app-container ${showResults ? 'results-mode' : 'search-mode'}`}>
+      <ParticlesBackground />
       {!showResults && (
         <div className="hero-section">
           <div className="hero-content">
