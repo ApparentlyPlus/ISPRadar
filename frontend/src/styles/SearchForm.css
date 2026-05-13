@@ -91,6 +91,7 @@
 }
 
 .field-input:disabled {
+  pointer-events: none;
   opacity: 0.3;
   background: rgba(255,255,255,0.02);
   border-color: rgba(128,128,128,0.4);
@@ -113,9 +114,14 @@
 }
 
 /* Dropdown */
-.dropdown-wrap { 
+.dropdown-wrap {
   position: relative;
   z-index: 10000;
+}
+
+/* When the list is open, bring the whole wrap above siblings */
+.dropdown-wrap:focus-within {
+  z-index: 10002;
 }
 
 .dropdown-list {
