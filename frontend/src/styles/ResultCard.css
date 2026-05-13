@@ -52,18 +52,16 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: var(--font-display);
-  font-weight: 700;
-  font-size: 16px;
-  color: white;
   flex-shrink: 0;
-  background: rgba(255, 255, 255, 0.1);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  overflow: hidden;
 }
 
-.provider-logo.vodafone { background: linear-gradient(135deg, #e60000, #990000); }
-.provider-logo.cosmote  { background: linear-gradient(135deg, #009900, #004d00); }
-.provider-logo.nova     { background: linear-gradient(135deg, #00ccff, #0077b3); }
+.provider-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+}
 
 .plan-title {
   display: flex;

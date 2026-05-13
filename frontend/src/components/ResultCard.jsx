@@ -1,7 +1,17 @@
 import React from 'react';
 import '../styles/ResultCard.css';
+import cmtLogo from '../assets/cmt.svg';
+import vdfLogo from '../assets/vdf.svg';
+import novaLogo from '../assets/nova.svg';
 
 export default function ResultCard({ plan, loading }) {
+  const getProviderLogo = (provider) => {
+    const providerLower = provider?.toLowerCase() ?? '';
+    if (providerLower.includes('cosmote')) return cmtLogo;
+    if (providerLower.includes('vodafone')) return vdfLogo;
+    if (providerLower.includes('nova')) return novaLogo;
+    return null;
+  };
   if (loading) {
     return (
       <div className="plan-card skeleton">
@@ -38,7 +48,7 @@ export default function ResultCard({ plan, loading }) {
       <div className="plan-section header-section">
         <div className="provider-info">
           <div className={`provider-logo ${providerClass}`}>
-             {plan.provider ? plan.provider.charAt(0).toUpperCase() : 'I'}
+            <img src={getProviderLogo(plan.provider)} alt={plan.provider} />
           </div>
           <div className="plan-title">
             <div className="name" title={plan.name}>{plan.name}</div>
