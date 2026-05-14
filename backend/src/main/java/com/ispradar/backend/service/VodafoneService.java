@@ -195,7 +195,7 @@ public class VodafoneService {
         ensureInitialized();
 
         String json = buildCheckPayload(stateCtx, cityCtx, postalCtx, streetCtx, numberCtx, null);
-    HttpResponse<String> resp = sendCheckRequest(json);
+        HttpResponse<String> resp = sendCheckRequest(json);
 
         if (resp.statusCode() == 403 || resp.statusCode() == 302) {
             resetSession();
