@@ -71,10 +71,19 @@ public class NovaService {
                     .timeout(Duration.ofSeconds(15))
                     .header("User-Agent", USER_AGENT)
                     .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+                    .header("accept-language", "el")
+                    .header("priority", "u=1, i")
+                    .header("sec-ch-ua", "\"Google Chrome\";v=\"147\", \"Not.A/Brand\";v=\"8\", \"Chromium\";v=\"147\"")
+                    .header("sec-ch-ua-mobile", "?0")
+                    .header("sec-ch-ua-platform", "\"Windows\"")
+                    .header("sec-fetch-dest", "empty")
+                    .header("sec-fetch-mode", "cors")
+                    .header("sec-fetch-site", "same-origin")
                     .GET()
                     .build();
 
             HttpResponse<String> r = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            LOG.debug("[Nova] Session init status: {}, cookies: {}", r.statusCode(), cookieManager.getCookieStore().getCookies());
             if (r.statusCode() >= 400) {
                 throw new IOException("Nova session init failed: HTTP " + r.statusCode());
             }
@@ -93,9 +102,16 @@ public class NovaService {
                 .timeout(Duration.ofSeconds(15))
                 .header("User-Agent", USER_AGENT)
                 .header("Accept", "application/json, text/plain, */*")
+                .header("Accept-Language", "el")
+                .header("Priority", "u=1, i")
                 .header("Referer", "https://nova.gr/statheri-tilefonia/programmata/stathero-internet")
+                .header("sec-ch-ua", "\"Google Chrome\";v=\"147\", \"Not.A/Brand\";v=\"8\", \"Chromium\";v=\"147\"")
+                .header("sec-ch-ua-mobile", "?0")
+                .header("sec-ch-ua-platform", "\"Windows\"")
+                .header("sec-fetch-dest", "empty")
                 .header("sec-fetch-mode", "cors")
-                .header("sec-fetch-site", "same-origin");
+                .header("sec-fetch-site", "same-origin")
+                .header("X-Requested-With", "XMLHttpRequest");
     }
 
     public Map<String, Map<String, Object>> fetchStates() throws IOException, InterruptedException {
@@ -207,6 +223,7 @@ public class NovaService {
 
         HttpRequest req = buildApiReq(AVAIL_API)
                 .header("Content-Type", "application/json")
+                .timeout(Duration.ofSeconds(15))
                 .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
                 .build();
 
