@@ -14,7 +14,7 @@ public class AppConfig {
 
     @Bean(destroyMethod = "shutdownNow")
     public ExecutorService ispExecutor() {
-        return Executors.newFixedThreadPool(8);
+        return Executors.newVirtualThreadPerTaskExecutor();
     }
 
     @Bean
