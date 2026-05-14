@@ -3,6 +3,7 @@ package com.ispradar.backend.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ispradar.backend.dto.Plan;
+import com.ispradar.backend.service.PlanCatalog.PlanMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -191,7 +192,6 @@ public class VodafoneService {
                 "streetName", (String) streetCtx.get("value")));
     }
 
-    @SuppressWarnings("unchecked")
     public List<Plan> checkAvailability(
             Map<String, Object> stateCtx,
             Map<String, Object> cityCtx,
@@ -279,10 +279,15 @@ public class VodafoneService {
         List<Map<String, Object>> speeds =
                 (List<Map<String, Object>>) data.getOrDefault("availableSpeeds", List.of());
         for (Map<String, Object> plan : speeds) {
-            String name = (String) plan.getOrDefault("name", "Unknown Package");
-            Map<String, Object> s = (Map<String, Object>) plan.getOrDefault("speeds", Map.of());
-            plans.add(new Plan("VODAFONE", name, toDouble(s.get("maxPromisedSpeedDownload")),
-                    toDouble(s.get("maxPromisedSpeedUpload"))));
+        String name = (String) plan.getOrDefault("name", "Unknown Package");
+        Map<String, Object> s = (Map<String, Object>) plan.getOrDefault("speeds", Map.of());
+        Double maxDl = toDouble(s.get("maxPromisedSpeedDownload"));
+        PlanMetadata meta = PlanCatalog.lookup("VODAFONE", name, maxDl);
+        String resolvedName = meta != null ? meta.name() : name;
+        Double price = meta != null ? meta.price() : null;
+        List<String> description = meta != null ? meta.description() : List.of();
+        plans.add(new Plan("VODAFONE", resolvedName, toDouble(s.get("maxPromisedSpeedDownload")),
+            toDouble(s.get("maxPromisedSpeedUpload")), price, description));
         }
         return plans;
     }

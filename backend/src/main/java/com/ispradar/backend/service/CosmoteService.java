@@ -1,6 +1,7 @@
 package com.ispradar.backend.service;
 
 import com.ispradar.backend.dto.Plan;
+import com.ispradar.backend.service.PlanCatalog.PlanMetadata;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -22,7 +23,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -305,7 +305,11 @@ public class CosmoteService {
             String type = inferType(rawName, maxMbps);
             Double dl = computeDownload(maxMbps);
             Double ul = computeUpload(dl);
-            out.add(new Plan("COSMOTE", type, round2(dl), round2(ul)));
+            PlanMetadata meta = PlanCatalog.lookupCosmoteByKey(type);
+            String name = meta != null ? meta.name() : rawName;
+            Double price = meta != null ? meta.price() : null;
+            List<String> description = meta != null ? meta.description() : List.of();
+            out.add(new Plan("COSMOTE", name, round2(dl), round2(ul), price, description));
         }
         return out;
     }
@@ -330,19 +334,21 @@ public class CosmoteService {
         if (upper.contains("ADSL")) {
             return "ADSL_" + Math.round(maxMbps);
         }
-        if (upper.contains("FIBER")) {
+        if (upper.contains("VDSL")) {
+            return "VDSL_" + Math.round(maxMbps);
+        }
+        if (upper.contains("FIBER") || maxMbps >= 100) {
             return "FIBER_" + Math.round(maxMbps);
         }
         return "PLAN_" + Math.round(maxMbps);
     }
 
     private Double computeDownload(double maxMbps) {
-        double factor = ThreadLocalRandom.current().nextDouble(0.80, 0.90);
-        return maxMbps * factor;
+        return maxMbps;
     }
 
     private Double computeUpload(double downloadMbps) {
-        return (downloadMbps / 2.0) * 0.70;
+        return downloadMbps / 2.0;
     }
 
     private Double round2(double value) {

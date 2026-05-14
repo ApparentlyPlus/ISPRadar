@@ -3,6 +3,7 @@ package com.ispradar.backend.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ispradar.backend.dto.Plan;
+import com.ispradar.backend.service.PlanCatalog.PlanMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -44,12 +45,10 @@ public class NovaService {
     private final ExecutorService executorService;
 
     private static final class Session {
-        private final CookieManager cookieManager;
         private final HttpClient httpClient;
         private boolean initialized;
 
-        private Session(CookieManager cookieManager, HttpClient httpClient) {
-            this.cookieManager = cookieManager;
+        private Session(HttpClient httpClient) {
             this.httpClient = httpClient;
             this.initialized = false;
         }
@@ -61,13 +60,12 @@ public class NovaService {
     }
 
     private Session newSession() {
-        CookieManager cookieManager = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
         HttpClient httpClient = HttpClient.newBuilder()
-                .cookieHandler(cookieManager)
+        .cookieHandler(new CookieManager(null, CookiePolicy.ACCEPT_ALL))
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .connectTimeout(Duration.ofSeconds(15))
                 .build();
-        return new Session(cookieManager, httpClient);
+    return new Session(httpClient);
     }
 
     private void init(Session session) throws IOException, InterruptedException {
@@ -327,7 +325,11 @@ public class NovaService {
                     maxUl = maxDl / 10.0; // Typical rate
                 }
                 
-                plans.add(new Plan("NOVA", title, maxDl, maxUl));
+                PlanMetadata meta = PlanCatalog.lookup("NOVA", title);
+                String resolvedName = meta != null ? meta.name() : title;
+                Double price = meta != null ? meta.price() : null;
+                List<String> description = meta != null ? meta.description() : List.of();
+                plans.add(new Plan("NOVA", resolvedName, maxDl, maxUl, price, description));
             }
         }
         return plans;

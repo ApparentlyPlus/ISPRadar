@@ -42,6 +42,10 @@ export default function ResultCard({ plan, loading }) {
   const providerClass = plan.provider ? plan.provider.toLowerCase() : 'default';
   const downloadSpeed = plan.download ? plan.download.replace(/ Mbps/i, '') : '--';
   const uploadSpeed = plan.upload ? plan.upload.replace(/ Mbps/i, '') : null;
+  const priceValue = plan.price !== null && plan.price !== undefined ? Number(plan.price) : null;
+  const formattedPrice = priceValue !== null && !Number.isNaN(priceValue)
+    ? priceValue.toFixed(2)
+    : '--.--';
 
   return (
     <div className="plan-card">
@@ -90,7 +94,7 @@ export default function ResultCard({ plan, loading }) {
           )}
         </div>
         <div className="price-block">
-          <div className="price">€--.--</div>
+          <div className="price">€{formattedPrice}</div>
           <div className="period">/ month</div>
         </div>
       </div>
