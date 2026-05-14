@@ -68,7 +68,7 @@ public class NovaService {
 
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(INIT_URL))
-                    .timeout(Duration.ofSeconds(15))
+                    //.timeout(Duration.ofSeconds(15))
                     .header("User-Agent", USER_AGENT)
                     .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
                     .header("accept-language", "el")
@@ -223,7 +223,7 @@ public class NovaService {
 
         HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(AVAIL_API))
-                .timeout(Duration.ofSeconds(30))
+                //.timeout(Duration.ofSeconds(30))
                 .header("User-Agent", USER_AGENT)
                 .header("Accept", "application/json, text/plain, */*")
                 .header("Accept-Language", "el")
@@ -377,8 +377,6 @@ public class NovaService {
                         LOG.debug("[Nova] Skipping package without parsed speed: {}", title);
                         continue;
                     }
-
-                    plans.add(new Plan("NOVA", title, maxDl, maxUl, null, List.of()));
                 
                 PlanMetadata meta = PlanCatalog.lookup("NOVA", title);
                 String resolvedName = meta != null ? meta.name() : title;

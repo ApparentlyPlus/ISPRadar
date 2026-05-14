@@ -206,7 +206,7 @@ public class VodafoneService {
         Map<String, Object> data = objectMapper.readValue(resp.body(), new TypeReference<>() {});
         if ("showFloorDropdown".equals(data.get("renderScenario"))) {
             LOG.info("[Vodafone] Floor dropdown required");
-            Map<String, Object> floor = Map.of("label", "1ος όροφος", "value", "O01");
+            Map<String, Object> floor = Map.of("label", "Ισόγειο", "value", "O00");
             String retryJson = buildCheckPayload(stateCtx, cityCtx, postalCtx, streetCtx, numberCtx, floor);
             resp = sendCheckRequest(retryJson);
             data = objectMapper.readValue(resp.body(), new TypeReference<>() {});
@@ -219,7 +219,7 @@ public class VodafoneService {
             throws IOException, InterruptedException {
         HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(AVAIL_API))
-                .timeout(Duration.ofSeconds(15))
+                //.timeout(Duration.ofSeconds(15))
                 .header("User-Agent", USER_AGENT)
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json, */*")
