@@ -336,9 +336,18 @@ public class NovaService {
                 }
                 
                 // Final fallback if the map didn't contain the upload speed
-                if (maxDl != null && maxUl == null) {
-                    maxUl = maxDl / 10.0; // Typical rate
-                }
+                    if (maxDl != null && maxUl == null) {
+                        maxUl = maxDl / 10.0; // Typical rate
+                    }
+
+                    // If we couldn't determine a reasonable download speed, skip this package.
+                    // This filters out mobile/5G offers (e.g. "5G Home Internet") and other non-fixed products
+                    if (maxDl == null) {
+                        LOG.debug("[Nova] Skipping package without parsed speed: {}", title);
+                        continue;
+                    }
+
+                    plans.add(new Plan("NOVA", title, maxDl, maxUl, null, List.of()));
                 
                 PlanMetadata meta = PlanCatalog.lookup("NOVA", title);
                 String resolvedName = meta != null ? meta.name() : title;
