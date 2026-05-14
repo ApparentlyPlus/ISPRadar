@@ -238,13 +238,13 @@
     rgba(255,255,255,0.08) 50%,
     rgba(255,255,255,0.03) 75%);
   background-size: 300% 100%;
-  animation: ske 6s linear infinite;
+  animation: ske 5s linear infinite;
   border-radius: 6px;
 }
 
 @keyframes ske {
-  0%   { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+  0%   { background-position: -150% 0; }
+  100% { background-position: 150% 0; }
 }
 
 .ske-logo { width: 34px; height: 34px; border-radius: 8px; flex-shrink: 0; }
