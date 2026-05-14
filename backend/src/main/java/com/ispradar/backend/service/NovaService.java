@@ -221,14 +221,28 @@ public class NovaService {
         Map<String, Object> payload = buildAvailabilityPayload(stateCtx, munCtx, streetCtx, streetNumber);
         String jsonBody = objectMapper.writeValueAsString(payload);
 
-        HttpRequest req = buildApiReq(AVAIL_API)
+        HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(AVAIL_API))
+                .timeout(Duration.ofSeconds(30))
+                .header("User-Agent", USER_AGENT)
+                .header("Accept", "application/json, text/plain, */*")
+                .header("Accept-Language", "el")
+                .header("Priority", "u=1, i")
+                .header("Referer", "https://nova.gr/statheri-tilefonia/programmata/stathero-internet")
+                .header("sec-ch-ua", "\"Google Chrome\";v=\"147\", \"Not.A/Brand\";v=\"8\", \"Chromium\";v=\"147\"")
+                .header("sec-ch-ua-mobile", "?0")
+                .header("sec-ch-ua-platform", "\"Windows\"")
+                .header("sec-fetch-dest", "empty")
+                .header("sec-fetch-mode", "cors")
+                .header("sec-fetch-site", "same-origin")
                 .header("Content-Type", "application/json")
-                .timeout(Duration.ofSeconds(15))
+                .header("X-Requested-With", "XMLHttpRequest")
                 .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
                 .build();
 
         HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
         if (resp.statusCode() == 403 || resp.statusCode() == 302) {
+            LOG.warn("[Nova] Got {} response, resetting session", resp.statusCode());
             resetSession();
             ensureInitialized();
             resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());

@@ -12,7 +12,7 @@ function fuzzy(str, query) {
   }
 }
 
-function DropdownField({ label, placeholder, value, onChange, onSelect, items, open, onOpen, disabled, loading, filled }) {
+function DropdownField({ label, placeholder, value, onChange, onSelect, items, open, onOpen, disabled, loading, filled, onBlur }) {
   const ref = useRef(null);
   const filtered = value ? items.filter(i => fuzzy(i.label, value)) : items;
 
@@ -35,6 +35,7 @@ function DropdownField({ label, placeholder, value, onChange, onSelect, items, o
           value={value}
           onChange={e => { onChange(e.target.value); if (!open) onOpen(true); }}
           onFocus={() => !disabled && onOpen(true)}
+          onBlur={onBlur}
           disabled={disabled}
           autoComplete="off"
         />
@@ -84,18 +85,21 @@ export default function SearchForm({ onSearch, loading }) {
   const [municipalities, setMunicipalities] = useState([]);
   const [streets,        setStreets]        = useState([]);
   const [areas,          setAreas]          = useState([]);
+  const [numbers,        setNumbers]        = useState([]);
 
   // loading flags per-field
   const [loadingStates,  setLoadingStates]  = useState(true);
   const [loadingMunis,   setLoadingMunis]   = useState(false);
   const [loadingStreets, setLoadingStreets] = useState(false);
   const [loadingAreas,   setLoadingAreas]   = useState(false);
+  const [loadingNumbers, setLoadingNumbers] = useState(false);
 
   // selected values
   const [selectedState,        setSelectedState]        = useState(null);
   const [selectedMunicipality, setSelectedMunicipality] = useState(null);
   const [selectedStreet,       setSelectedStreet]       = useState(null);
   const [selectedArea,         setSelectedArea]         = useState(null);
+  const [selectedNumberItem,   setSelectedNumberItem]   = useState(null);
 
   // text inputs (typed / displayed)
   const [stateInput,        setStateInput]        = useState('');
@@ -124,11 +128,11 @@ export default function SearchForm({ onSearch, loading }) {
     setStateInput(state.label);
     // reset downstream
     setSelectedMunicipality(null); setMunicipalityInput('');
-    setPostalCode('');
+  setPostalCode('');
     setSelectedStreet(null); setStreetInput('');
     setSelectedArea(null); setAreaInput('');
-    setStreetNumber('');
-    setMunicipalities([]); setStreets([]); setAreas([]);
+    setSelectedNumberItem(null); setStreetNumber('');
+  setMunicipalities([]); setStreets([]); setAreas([]); setNumbers([]);
 
     setLoadingMunis(true);
     try {
@@ -155,16 +159,24 @@ export default function SearchForm({ onSearch, loading }) {
     setPostalCode('');
     setSelectedStreet(null); setStreetInput('');
     setSelectedArea(null); setAreaInput('');
-    setStreetNumber('');
-    setStreets([]); setAreas([]);
+    setSelectedNumberItem(null); setStreetNumber('');
+    setStreets([]); setAreas([]); setNumbers([]);
   };
 
-  const handlePostalBlur = async () => {
-    if (!postalCode || !selectedState || !selectedMunicipality) return;
+  const buildPostalItem = (value) => ({
+    label: value,
+    cosmoteCtx: null,
+    vodafoneCtx: { label: value, value },
+    novaCtx: null,
+  });
+
+  const loadStreets = async (postalItem) => {
+    if (!postalItem || !selectedState || !selectedMunicipality) return;
     setStreets([]);
     setSelectedStreet(null); setStreetInput('');
     setSelectedArea(null); setAreaInput('');
-    setStreetNumber('');
+    setSelectedNumberItem(null); setStreetNumber('');
+    setAreas([]); setNumbers([]);
 
     setLoadingStreets(true);
     try {
@@ -174,11 +186,7 @@ export default function SearchForm({ onSearch, loading }) {
         body: JSON.stringify({
           state: selectedState,
           municipality: selectedMunicipality,
-          postalCode: {
-            label: postalCode,
-            cosmoteCtx: null,
-            vodafoneCtx: { label: postalCode, value: postalCode },
-          },
+          postalCode: postalItem,
         }),
       });
       const d = await r.json();
@@ -187,12 +195,18 @@ export default function SearchForm({ onSearch, loading }) {
     finally { setLoadingStreets(false); }
   };
 
+  const handlePostalBlur = () => {
+    if (!postalCode) return;
+    if (!selectedState || !selectedMunicipality) return;
+    loadStreets(buildPostalItem(postalCode));
+  };
+
   const handleStreetSelect = async (street) => {
     setSelectedStreet(street);
     setStreetInput(street.label);
     setSelectedArea(null); setAreaInput('');
-    setStreetNumber('');
-    setAreas([]);
+    setSelectedNumberItem(null); setStreetNumber('');
+    setAreas([]); setNumbers([]);
 
     setLoadingAreas(true);
     try {
@@ -210,6 +224,41 @@ export default function SearchForm({ onSearch, loading }) {
       }
     } catch (e) { console.error(e); }
     finally { setLoadingAreas(false); }
+
+    loadNumbers(street);
+  };
+
+  const loadNumbers = async (street) => {
+    if (!selectedState || !selectedMunicipality || !street) return;
+  const postalItem = postalCode ? buildPostalItem(postalCode) : null;
+    if (!postalItem) return;
+
+    setLoadingNumbers(true);
+    try {
+      const r = await fetch('http://localhost:8080/api/address/numbers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          state: selectedState,
+          municipality: selectedMunicipality,
+          postalCode: postalItem,
+          street: street,
+        }),
+      });
+      const d = await r.json();
+      setNumbers(d.items || []);
+    } catch (e) { console.error(e); }
+    finally { setLoadingNumbers(false); }
+  };
+
+  const handleNumberSelect = (numberItem) => {
+    setSelectedNumberItem(numberItem);
+    setStreetNumber(numberItem.label);
+  };
+
+  const handleNumberChange = (value) => {
+    setStreetNumber(value);
+    setSelectedNumberItem(null);
   };
 
   const handleAreaSelect = (area) => {
@@ -219,24 +268,21 @@ export default function SearchForm({ onSearch, loading }) {
 
   const handleSearch = () => {
     if (!canSearch) return;
+  const postalItem = buildPostalItem(postalCode);
     onSearch({
       state: selectedState,
       municipality: selectedMunicipality,
-      postalCode: {
-        label: postalCode,
-        cosmoteCtx: null,
-        vodafoneCtx: { label: postalCode, value: postalCode },
-      },
+      postalCode: postalItem,
       street: selectedStreet,
       area: selectedArea,
       number: streetNumber,
-      numberItem: null,
+      numberItem: selectedNumberItem,
     });
   };
 
   // ── derived booleans ──────────────────────────────────────
   const canSearch =
-    selectedState && selectedMunicipality && postalCode &&
+  selectedState && selectedMunicipality && postalCode &&
     selectedStreet && streetNumber && !loading;
 
   return (
@@ -310,9 +356,9 @@ export default function SearchForm({ onSearch, loading }) {
             />
             <TextField
               label="Number"
-              placeholder="42"
+              placeholder="e.g. 42"
               value={streetNumber}
-              onChange={setStreetNumber}
+              onChange={handleNumberChange}
               disabled={!selectedStreet}
               filled={!!streetNumber}
             />
