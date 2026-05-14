@@ -206,7 +206,7 @@ public class VodafoneService {
         Map<String, Object> data = objectMapper.readValue(resp.body(), new TypeReference<>() {});
         if ("showFloorDropdown".equals(data.get("renderScenario"))) {
             LOG.info("[Vodafone] Floor dropdown required");
-            Map<String, Object> floor = Map.of("label", "Ισόγειο", "value", "O00");
+            Map<String, Object> floor = Map.of("label", "1ος όροφος", "value", "O01");
             String retryJson = buildCheckPayload(stateCtx, cityCtx, postalCtx, streetCtx, numberCtx, floor);
             resp = sendCheckRequest(retryJson);
             data = objectMapper.readValue(resp.body(), new TypeReference<>() {});
