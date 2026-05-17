@@ -1,0 +1,137 @@
+.loading-animation-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 40px 20px;
+  animation: fadeIn 0.4s var(--ease) both;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.loading-animation {
+  position: relative;
+  width: 100%;
+  max-width: 300px;
+  height: 120px;
+  margin: 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius);
+  background: var(--glass);
+  border: 1px solid var(--glass-border-cyan);
+  backdrop-filter: blur(14px) saturate(140%);
+}
+
+.loader {
+  --size1: 150px;
+  --size2: 150px;
+  --xleft: 0%;
+  --xright: 100%;
+  --ytop: 0%;
+
+  position: absolute;
+  width: var(--size1);
+  height: var(--size2);
+  border-radius: var(--radius);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(0, 217, 255, 0.15),
+    transparent
+  );
+  background-size: 200% 100%;
+  animation: gradientShift 3s linear infinite;
+  z-index: -1;
+}
+
+@keyframes gradientShift {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.glow {
+  position: absolute;
+  height: 50%;
+  border-radius: var(--radius);
+  box-shadow: 
+    0px -5px 30px rgba(0, 217, 255, 0.15),
+    0px 0px 10px rgba(0, 217, 255, 0.05);
+  z-index: -1;
+}
+
+.glow1 {
+  left: 50%;
+  top: 0%;
+  transform: translateX(-50%);
+}
+
+.glow2 {
+  right: 0%;
+  top: 0%;
+}
+
+.triangle {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%) scaleY(0);
+  width: 100%;
+  height: 100%;
+  background: conic-gradient(
+    from -68deg at 50% 100%,
+    var(--cyan-dark) 136deg,
+    transparent 0turn
+  );
+  border-radius: var(--radius);
+  filter: blur(48px);
+  opacity: 0.3;
+  z-index: -1;
+}
+
+.loading-text {
+  margin-top: 20px;
+  font-size: 13px;
+  color: var(--text-2);
+  font-family: var(--font-body);
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  animation: pulse 4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .loading-animation-container {
+    padding: 30px 20px;
+  }
+
+  .loading-animation {
+    max-width: 250px;
+    height: 100px;
+  }
+
+  .loading-text {
+    font-size: 11px;
+  }
+}

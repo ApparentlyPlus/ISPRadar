@@ -69,7 +69,7 @@ public class AddressOrchestrator {
         var c = municipality != null && municipality.cosmoteCtx() != null
                 ? runAsync(() -> cosmote.fetchStreets(municipality.cosmoteCtx()))
                 : done();
-        Map<String, Object> postalCtx = vodafoneCtxFrom(postalCode);
+        Map<String, Object> postalCtx = resolveVodafonePostal(state, municipality, postalCode);
         var v = state != null && municipality != null && postalCtx != null
             && state.vodafoneCtx() != null && municipality.vodafoneCtx() != null
             ? runAsync(() -> vodafone.fetchStreets(state.vodafoneCtx(), municipality.vodafoneCtx(), postalCtx))
@@ -94,7 +94,7 @@ public class AddressOrchestrator {
             || street.vodafoneCtx() == null) {
             return empty();
         }
-        Map<String, Object> postalCtx = vodafoneCtxFrom(postalCode);
+        Map<String, Object> postalCtx = resolveVodafonePostal(state, municipality, postalCode);
         if (postalCtx == null) return empty();
         var v = runAsync(() -> vodafone.fetchNumbers(
             state.vodafoneCtx(), municipality.vodafoneCtx(),
@@ -140,7 +140,8 @@ public class AddressOrchestrator {
                 && req.state().vodafoneCtx() != null
                 && req.municipality().vodafoneCtx() != null
                 && req.street().vodafoneCtx() != null) {
-            Map<String, Object> postalCtx = vodafoneCtxFrom(req.postalCode());
+            Map<String, Object> postalCtx = resolveVodafonePostal(
+                    req.state(), req.municipality(), req.postalCode());
             Map<String, Object> tmpNumberCtx = vodafoneCtxFrom(req.numberItem());
             if (tmpNumberCtx == null && req.number() != null && !req.number().isBlank()) {
                 tmpNumberCtx = Map.of("label", req.number(), "value", req.number());
@@ -160,6 +161,8 @@ public class AddressOrchestrator {
                     errors.add("VODAFONE: " + e.getMessage());
                 }
             }, executor));
+            } else if (postalCtx == null) {
+                errors.add("VODAFONE: invalid postal code");
             }
         }
 
@@ -266,6 +269,35 @@ public class AddressOrchestrator {
         if (item.vodafoneCtx() != null) return item.vodafoneCtx();
         if (item.label() == null || item.label().isBlank()) return null;
         return Map.of("label", item.label(), "value", item.label());
+    }
+
+    private Map<String, Object> resolveVodafonePostal(
+            AddressItem state,
+            AddressItem municipality,
+            AddressItem postalCode) {
+        if (postalCode == null || postalCode.label() == null || postalCode.label().isBlank()) {
+            return null;
+        }
+        if (postalCode.vodafoneCtx() != null) {
+            return postalCode.vodafoneCtx();
+        }
+        if (state == null || municipality == null
+                || state.vodafoneCtx() == null || municipality.vodafoneCtx() == null) {
+            return null;
+        }
+        try {
+            Map<String, Map<String, Object>> options = vodafone.fetchPostalCodes(
+                    state.vodafoneCtx(), municipality.vodafoneCtx());
+            String target = normalize(postalCode.label());
+            for (Map.Entry<String, Map<String, Object>> entry : options.entrySet()) {
+                if (normalize(entry.getKey()).equals(target)) {
+                    return entry.getValue();
+                }
+            }
+        } catch (Exception e) {
+            LOG.error("[Vodafone] postal code resolve failed", e);
+        }
+        return null;
     }
 
     private String buildAddressLabel(AvailabilityRequest req) {

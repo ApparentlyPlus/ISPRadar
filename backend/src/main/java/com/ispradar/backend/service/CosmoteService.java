@@ -1,6 +1,7 @@
 package com.ispradar.backend.service;
 
 import com.ispradar.backend.dto.Plan;
+import com.ispradar.backend.service.PlanCatalog.PlanMetadata;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -22,7 +23,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -95,38 +95,39 @@ public class CosmoteService {
         STATES.put("ΧΙΟΥ", "47");
     }
 
-    private static final class Session {
-        private final CookieManager cookieManager;
-        private final HttpClient httpClient;
-        private boolean initialized;
+    private final CookieManager cookieManager;
+    private final HttpClient httpClient;
+    private final Object initLock = new Object();
+    private volatile boolean initialized;
 
-        private Session(CookieManager cookieManager, HttpClient httpClient) {
-            this.cookieManager = cookieManager;
-            this.httpClient = httpClient;
-            this.initialized = false;
-        }
-    }
-
-    private Session newSession() {
-        CookieManager cookieManager = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
-        HttpClient httpClient = HttpClient.newBuilder()
+    public CosmoteService() {
+        this.cookieManager = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
+        this.httpClient = HttpClient.newBuilder()
                 .cookieHandler(cookieManager)
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .connectTimeout(Duration.ofSeconds(15))
                 .build();
-        return new Session(cookieManager, httpClient);
+        this.initialized = false;
     }
 
-    private void init(Session session) throws IOException, InterruptedException {
-        if (session.initialized) return;
-        LOG.info("[Cosmote] Initialising session...");
-        HttpResponse<String> r = session.httpClient.send(
-                buildGet(START_URL, "text/html,application/xhtml+xml,*/*"),
-                HttpResponse.BodyHandlers.ofString());
-        if (r.statusCode() != 200) {
-            throw new IOException("Cosmote session init failed: HTTP " + r.statusCode());
+    private void ensureInitialized() throws IOException, InterruptedException {
+        if (initialized) return;
+        synchronized (initLock) {
+            if (initialized) return;
+            LOG.info("[Cosmote] Initialising session...");
+            HttpResponse<String> r = httpClient.send(
+                    buildGet(START_URL, "text/html,application/xhtml+xml,*/*"),
+                    HttpResponse.BodyHandlers.ofString());
+            if (r.statusCode() != 200) {
+                throw new IOException("Cosmote session init failed: HTTP " + r.statusCode());
+            }
+            initialized = true;
         }
-        session.initialized = true;
+    }
+
+    private void resetSession() {
+        cookieManager.getCookieStore().removeAll();
+        initialized = false;
     }
 
     private HttpRequest buildGet(String url, String accept) {
@@ -153,19 +154,18 @@ public class CosmoteService {
         return sb.toString();
     }
 
-    private Map<String, String> fetchOptions(Session session, Map<String, String> params)
+    private Map<String, String> fetchOptions(Map<String, String> params)
             throws IOException, InterruptedException {
-        init(session);
+        ensureInitialized();
         String url = buildDropUrl(params);
-        HttpResponse<String> resp = session.httpClient.send(
+        HttpResponse<String> resp = httpClient.send(
                 buildGet(url, "text/html,application/xhtml+xml,*/*"),
                 HttpResponse.BodyHandlers.ofString());
 
         if (resp.statusCode() == 403 || resp.statusCode() == 302) {
-            session.cookieManager.getCookieStore().removeAll();
-            session.initialized = false;
-            init(session);
-            resp = session.httpClient.send(
+            resetSession();
+            ensureInitialized();
+            resp = httpClient.send(
                     buildGet(buildDropUrl(params), "text/html,application/xhtml+xml,*/*"),
                     HttpResponse.BodyHandlers.ofString());
         }
@@ -198,9 +198,8 @@ public class CosmoteService {
 
     public Map<String, Map<String, Object>> fetchMunicipalities(Map<String, Object> stateCtx)
             throws IOException, InterruptedException {
-        Session session = newSession();
         String stateId = (String) stateCtx.get("stateId");
-        Map<String, String> raw = fetchOptions(session, Map.of("stateId", stateId, "removePrefix", "true"));
+        Map<String, String> raw = fetchOptions(Map.of("stateId", stateId, "removePrefix", "true"));
         Map<String, Map<String, Object>> result = new LinkedHashMap<>();
         raw.forEach((label, munId) -> result.put(label, Map.of(
                 "stateId", stateId,
@@ -212,10 +211,9 @@ public class CosmoteService {
 
     public Map<String, Map<String, Object>> fetchStreets(Map<String, Object> munCtx)
             throws IOException, InterruptedException {
-        Session session = newSession();
         String stateId = (String) munCtx.get("stateId");
         String munId = (String) munCtx.get("municipalityId");
-        Map<String, String> raw = fetchOptions(session, Map.of("stateId", stateId, "municipalityId", munId));
+        Map<String, String> raw = fetchOptions(Map.of("stateId", stateId, "municipalityId", munId));
         Map<String, Map<String, Object>> result = new LinkedHashMap<>();
         raw.forEach((label, ignored) -> result.put(label, Map.of(
                 "stateId", stateId,
@@ -229,8 +227,7 @@ public class CosmoteService {
 
     public Map<String, Map<String, Object>> fetchAreas(Map<String, Object> streetCtx)
             throws IOException, InterruptedException {
-        Session session = newSession();
-        Map<String, String> raw = fetchOptions(session, Map.of(
+    Map<String, String> raw = fetchOptions(Map.of(
                 "streetName", ((String) streetCtx.get("streetName")).toUpperCase(),
                 "stateId", (String) streetCtx.get("stateId"),
                 "municipalityId", (String) streetCtx.get("municipalityId")));
@@ -250,9 +247,7 @@ public class CosmoteService {
             Map<String, Object> areaCtx,
             Map<String, Object> streetCtx,
             String number) throws IOException, InterruptedException {
-
-        Session session = newSession();
-        init(session);
+        ensureInitialized();
 
         Map<String, String> form = new LinkedHashMap<>();
         form.put("mTelno", "");
@@ -279,12 +274,11 @@ public class CosmoteService {
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build();
 
-        HttpResponse<String> resp = session.httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
         if (resp.statusCode() == 403 || resp.statusCode() == 302) {
-            session.cookieManager.getCookieStore().removeAll();
-            session.initialized = false;
-            init(session);
-            resp = session.httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            resetSession();
+            ensureInitialized();
+            resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
         }
         if (resp.statusCode() != 200) {
             throw new IOException("Cosmote availability error: HTTP " + resp.statusCode());
@@ -305,7 +299,11 @@ public class CosmoteService {
             String type = inferType(rawName, maxMbps);
             Double dl = computeDownload(maxMbps);
             Double ul = computeUpload(dl);
-            out.add(new Plan("COSMOTE", type, round2(dl), round2(ul)));
+            PlanMetadata meta = PlanCatalog.lookupCosmoteByKey(type);
+            String name = meta != null ? meta.name() : rawName;
+            Double price = meta != null ? meta.price() : null;
+            List<String> description = meta != null ? meta.description() : List.of();
+            out.add(new Plan("COSMOTE", name, round2(dl), round2(ul), price, description));
         }
         return out;
     }
@@ -330,19 +328,21 @@ public class CosmoteService {
         if (upper.contains("ADSL")) {
             return "ADSL_" + Math.round(maxMbps);
         }
-        if (upper.contains("FIBER")) {
+        if (upper.contains("VDSL")) {
+            return "VDSL_" + Math.round(maxMbps);
+        }
+        if (upper.contains("FIBER") || maxMbps >= 100) {
             return "FIBER_" + Math.round(maxMbps);
         }
         return "PLAN_" + Math.round(maxMbps);
     }
 
     private Double computeDownload(double maxMbps) {
-        double factor = ThreadLocalRandom.current().nextDouble(0.80, 0.90);
-        return maxMbps * factor;
+        return maxMbps;
     }
 
     private Double computeUpload(double downloadMbps) {
-        return (downloadMbps / 2.0) * 0.70;
+        return downloadMbps / 2.0;
     }
 
     private Double round2(double value) {

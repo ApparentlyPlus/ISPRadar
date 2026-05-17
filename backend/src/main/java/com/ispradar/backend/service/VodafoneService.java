@@ -3,6 +3,7 @@ package com.ispradar.backend.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ispradar.backend.dto.Plan;
+import com.ispradar.backend.service.PlanCatalog.PlanMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -43,37 +44,42 @@ public class VodafoneService {
     private static final String FIELDS_NUMBER = "streetNr,streetNrSuffix";
 
     private final ObjectMapper objectMapper;
-
-    private static final class Session {
-        private final CookieManager cookieManager;
-        private final HttpClient httpClient;
-        private boolean initialized;
-
-        private Session(CookieManager cookieManager, HttpClient httpClient) {
-            this.cookieManager = cookieManager;
-            this.httpClient = httpClient;
-            this.initialized = false;
-        }
-    }
+    private final CookieManager cookieManager;
+    private final HttpClient httpClient;
+    private final Object initLock = new Object();
+    private volatile boolean initialized;
 
     public VodafoneService(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
-    }
-
-    private Session newSession() {
-        CookieManager cookieManager = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
-        HttpClient httpClient = HttpClient.newBuilder()
+        this.cookieManager = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
+        this.httpClient = HttpClient.newBuilder()
                 .cookieHandler(cookieManager)
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .connectTimeout(Duration.ofSeconds(15))
                 .build();
-        return new Session(cookieManager, httpClient);
+        this.initialized = false;
     }
 
-    private void init(Session session) throws IOException, InterruptedException {
-        if (session.initialized) return;
-        LOG.info("[Vodafone] Initialising session...");
-        HttpRequest req = HttpRequest.newBuilder()
+    private void ensureInitialized() throws IOException, InterruptedException {
+        if (initialized) return;
+        synchronized (initLock) {
+            if (initialized) return;
+            LOG.info("[Vodafone] Initialising session...");
+            HttpResponse<String> r = httpClient.send(buildHomeRequest(), HttpResponse.BodyHandlers.ofString());
+            if (r.statusCode() >= 400) {
+                throw new IOException("Vodafone session init failed: HTTP " + r.statusCode());
+            }
+            initialized = true;
+        }
+    }
+
+    private void resetSession() {
+        cookieManager.getCookieStore().removeAll();
+        initialized = false;
+    }
+
+    private HttpRequest buildHomeRequest() {
+        return HttpRequest.newBuilder()
                 .uri(URI.create(HOME))
                 .timeout(Duration.ofSeconds(15))
                 .header("User-Agent", USER_AGENT)
@@ -82,11 +88,6 @@ public class VodafoneService {
                 .header("sec-fetch-site", "none")
                 .GET()
                 .build();
-        HttpResponse<String> r = session.httpClient.send(req, HttpResponse.BodyHandlers.ofString());
-        if (r.statusCode() >= 400) {
-            throw new IOException("Vodafone session init failed: HTTP " + r.statusCode());
-        }
-        session.initialized = true;
     }
 
     private URI buildGeoUri(Map<String, String> params) {
@@ -116,18 +117,17 @@ public class VodafoneService {
                 .build();
     }
 
-    private Map<String, Map<String, Object>> fetchOptions(Session session, Map<String, String> params)
+    private Map<String, Map<String, Object>> fetchOptions(Map<String, String> params)
             throws IOException, InterruptedException {
-        init(session);
+        ensureInitialized();
         URI uri = buildGeoUri(params);
-        HttpResponse<String> resp = session.httpClient.send(buildApiGet(uri), HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> resp = httpClient.send(buildApiGet(uri), HttpResponse.BodyHandlers.ofString());
 
         if (resp.statusCode() == 404) return Collections.emptyMap();
         if (resp.statusCode() == 403 || resp.statusCode() == 302) {
-            session.cookieManager.getCookieStore().removeAll();
-            session.initialized = false;
-            init(session);
-            resp = session.httpClient.send(buildApiGet(uri), HttpResponse.BodyHandlers.ofString());
+            resetSession();
+            ensureInitialized();
+            resp = httpClient.send(buildApiGet(uri), HttpResponse.BodyHandlers.ofString());
         }
         if (resp.statusCode() != 200) {
             throw new IOException("Vodafone geo API error: HTTP " + resp.statusCode());
@@ -143,14 +143,12 @@ public class VodafoneService {
     }
 
     public Map<String, Map<String, Object>> fetchStates() throws IOException, InterruptedException {
-        Session session = newSession();
-        return fetchOptions(session, Map.of("fields", FIELDS_STATE));
+        return fetchOptions(Map.of("fields", FIELDS_STATE));
     }
 
     public Map<String, Map<String, Object>> fetchCities(Map<String, Object> stateCtx)
             throws IOException, InterruptedException {
-        Session session = newSession();
-        return fetchOptions(session, Map.of(
+    return fetchOptions(Map.of(
                 "fields", FIELDS_CITY,
                 PARAM_STATE, (String) stateCtx.get("value")));
     }
@@ -158,8 +156,7 @@ public class VodafoneService {
     public Map<String, Map<String, Object>> fetchPostalCodes(
             Map<String, Object> stateCtx,
             Map<String, Object> cityCtx) throws IOException, InterruptedException {
-        Session session = newSession();
-        return fetchOptions(session, Map.of(
+    return fetchOptions(Map.of(
                 "fields", FIELDS_POSTAL,
                 PARAM_STATE, (String) stateCtx.get("value"),
                 PARAM_CITY, (String) cityCtx.get("value")));
@@ -169,8 +166,7 @@ public class VodafoneService {
             Map<String, Object> stateCtx,
             Map<String, Object> cityCtx,
             Map<String, Object> postalCtx) throws IOException, InterruptedException {
-        Session session = newSession();
-        return fetchOptions(session, Map.of(
+    return fetchOptions(Map.of(
                 "fields", FIELDS_STREET,
                 PARAM_STATE, (String) stateCtx.get("value"),
                 PARAM_CITY, (String) cityCtx.get("value"),
@@ -182,8 +178,7 @@ public class VodafoneService {
             Map<String, Object> cityCtx,
             Map<String, Object> postalCtx,
             Map<String, Object> streetCtx) throws IOException, InterruptedException {
-        Session session = newSession();
-        return fetchOptions(session, Map.of(
+    return fetchOptions(Map.of(
                 "fields", FIELDS_NUMBER,
                 PARAM_STATE, (String) stateCtx.get("value"),
                 PARAM_CITY, (String) cityCtx.get("value"),
@@ -191,25 +186,21 @@ public class VodafoneService {
                 "streetName", (String) streetCtx.get("value")));
     }
 
-    @SuppressWarnings("unchecked")
     public List<Plan> checkAvailability(
             Map<String, Object> stateCtx,
             Map<String, Object> cityCtx,
             Map<String, Object> postalCtx,
             Map<String, Object> streetCtx,
             Map<String, Object> numberCtx) throws IOException, InterruptedException {
-
-        Session session = newSession();
-        init(session);
+        ensureInitialized();
 
         String json = buildCheckPayload(stateCtx, cityCtx, postalCtx, streetCtx, numberCtx, null);
-        HttpResponse<String> resp = sendCheckRequest(session, json);
+        HttpResponse<String> resp = sendCheckRequest(json);
 
         if (resp.statusCode() == 403 || resp.statusCode() == 302) {
-            session.cookieManager.getCookieStore().removeAll();
-            session.initialized = false;
-            init(session);
-            resp = sendCheckRequest(session, json);
+            resetSession();
+            ensureInitialized();
+            resp = sendCheckRequest(json);
         }
 
         Map<String, Object> data = objectMapper.readValue(resp.body(), new TypeReference<>() {});
@@ -217,18 +208,18 @@ public class VodafoneService {
             LOG.info("[Vodafone] Floor dropdown required");
             Map<String, Object> floor = Map.of("label", "Ισόγειο", "value", "O00");
             String retryJson = buildCheckPayload(stateCtx, cityCtx, postalCtx, streetCtx, numberCtx, floor);
-            resp = sendCheckRequest(session, retryJson);
+            resp = sendCheckRequest(retryJson);
             data = objectMapper.readValue(resp.body(), new TypeReference<>() {});
         }
 
         return parseVodafonePlans(data);
     }
 
-    private HttpResponse<String> sendCheckRequest(Session session, String jsonBody)
+    private HttpResponse<String> sendCheckRequest(String jsonBody)
             throws IOException, InterruptedException {
         HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(AVAIL_API))
-                .timeout(Duration.ofSeconds(15))
+                //.timeout(Duration.ofSeconds(15))
                 .header("User-Agent", USER_AGENT)
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json, */*")
@@ -236,7 +227,7 @@ public class VodafoneService {
                 .header("sec-fetch-site", "same-origin")
                 .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
                 .build();
-        return session.httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+        return httpClient.send(req, HttpResponse.BodyHandlers.ofString());
     }
 
     private String buildCheckPayload(
@@ -279,10 +270,15 @@ public class VodafoneService {
         List<Map<String, Object>> speeds =
                 (List<Map<String, Object>>) data.getOrDefault("availableSpeeds", List.of());
         for (Map<String, Object> plan : speeds) {
-            String name = (String) plan.getOrDefault("name", "Unknown Package");
-            Map<String, Object> s = (Map<String, Object>) plan.getOrDefault("speeds", Map.of());
-            plans.add(new Plan("VODAFONE", name, toDouble(s.get("maxPromisedSpeedDownload")),
-                    toDouble(s.get("maxPromisedSpeedUpload"))));
+        String name = (String) plan.getOrDefault("name", "Unknown Package");
+        Map<String, Object> s = (Map<String, Object>) plan.getOrDefault("speeds", Map.of());
+        Double maxDl = toDouble(s.get("maxPromisedSpeedDownload"));
+        PlanMetadata meta = PlanCatalog.lookup("VODAFONE", name, maxDl);
+        String resolvedName = meta != null ? meta.name() : name;
+        Double price = meta != null ? meta.price() : null;
+        List<String> description = meta != null ? meta.description() : List.of();
+        plans.add(new Plan("VODAFONE", resolvedName, toDouble(s.get("maxPromisedSpeedDownload")),
+            toDouble(s.get("maxPromisedSpeedUpload")), price, description));
         }
         return plans;
     }

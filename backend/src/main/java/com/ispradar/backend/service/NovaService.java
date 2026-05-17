@@ -3,6 +3,7 @@ package com.ispradar.backend.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ispradar.backend.dto.Plan;
+import com.ispradar.backend.service.PlanCatalog.PlanMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -42,51 +43,57 @@ public class NovaService {
 
     private final ObjectMapper objectMapper;
     private final ExecutorService executorService;
-
-    private static final class Session {
-        private final CookieManager cookieManager;
-        private final HttpClient httpClient;
-        private boolean initialized;
-
-        private Session(CookieManager cookieManager, HttpClient httpClient) {
-            this.cookieManager = cookieManager;
-            this.httpClient = httpClient;
-            this.initialized = false;
-        }
-    }
+    private final CookieManager cookieManager;
+    private final HttpClient httpClient;
+    private final Object initLock = new Object();
+    private volatile boolean initialized;
 
     public NovaService(ObjectMapper objectMapper, ExecutorService executorService) {
         this.objectMapper = objectMapper;
         this.executorService = executorService;
-    }
-
-    private Session newSession() {
-        CookieManager cookieManager = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
-        HttpClient httpClient = HttpClient.newBuilder()
+        this.cookieManager = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
+        this.httpClient = HttpClient.newBuilder()
                 .cookieHandler(cookieManager)
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .connectTimeout(Duration.ofSeconds(15))
                 .build();
-        return new Session(cookieManager, httpClient);
+        this.initialized = false;
     }
 
-    private void init(Session session) throws IOException, InterruptedException {
-        if (session.initialized) return;
-        LOG.info("[Nova] Initialising session cookies...");
-        
-        HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(INIT_URL))
-                .timeout(Duration.ofSeconds(15))
-                .header("User-Agent", USER_AGENT)
-                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
-                .GET()
-                .build();
-                
-        HttpResponse<String> r = session.httpClient.send(req, HttpResponse.BodyHandlers.ofString());
-        if (r.statusCode() >= 400) {
-            throw new IOException("Nova session init failed: HTTP " + r.statusCode());
+    private void ensureInitialized() throws IOException, InterruptedException {
+        if (initialized) return;
+        synchronized (initLock) {
+            if (initialized) return;
+            LOG.info("[Nova] Initialising session cookies...");
+
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(INIT_URL))
+                    //.timeout(Duration.ofSeconds(15))
+                    .header("User-Agent", USER_AGENT)
+                    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+                    .header("accept-language", "el")
+                    .header("priority", "u=1, i")
+                    .header("sec-ch-ua", "\"Google Chrome\";v=\"147\", \"Not.A/Brand\";v=\"8\", \"Chromium\";v=\"147\"")
+                    .header("sec-ch-ua-mobile", "?0")
+                    .header("sec-ch-ua-platform", "\"Windows\"")
+                    .header("sec-fetch-dest", "empty")
+                    .header("sec-fetch-mode", "cors")
+                    .header("sec-fetch-site", "same-origin")
+                    .GET()
+                    .build();
+
+            HttpResponse<String> r = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            LOG.debug("[Nova] Session init status: {}, cookies: {}", r.statusCode(), cookieManager.getCookieStore().getCookies());
+            if (r.statusCode() >= 400) {
+                throw new IOException("Nova session init failed: HTTP " + r.statusCode());
+            }
+            initialized = true;
         }
-        session.initialized = true;
+    }
+
+    private void resetSession() {
+        cookieManager.getCookieStore().removeAll();
+        initialized = false;
     }
 
     private HttpRequest.Builder buildApiReq(String url) {
@@ -95,17 +102,28 @@ public class NovaService {
                 .timeout(Duration.ofSeconds(15))
                 .header("User-Agent", USER_AGENT)
                 .header("Accept", "application/json, text/plain, */*")
+                .header("Accept-Language", "el")
+                .header("Priority", "u=1, i")
                 .header("Referer", "https://nova.gr/statheri-tilefonia/programmata/stathero-internet")
+                .header("sec-ch-ua", "\"Google Chrome\";v=\"147\", \"Not.A/Brand\";v=\"8\", \"Chromium\";v=\"147\"")
+                .header("sec-ch-ua-mobile", "?0")
+                .header("sec-ch-ua-platform", "\"Windows\"")
+                .header("sec-fetch-dest", "empty")
                 .header("sec-fetch-mode", "cors")
-                .header("sec-fetch-site", "same-origin");
+                .header("sec-fetch-site", "same-origin")
+                .header("X-Requested-With", "XMLHttpRequest");
     }
 
     public Map<String, Map<String, Object>> fetchStates() throws IOException, InterruptedException {
-        Session session = newSession();
-        init(session);
+        ensureInitialized();
 
         HttpRequest req = buildApiReq(REGIONS_API).GET().build();
-        HttpResponse<String> resp = session.httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+        if (resp.statusCode() == 403 || resp.statusCode() == 302) {
+            resetSession();
+            ensureInitialized();
+            resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+        }
         
         if (resp.statusCode() != 200) throw new IOException("Nova states error: " + resp.statusCode());
 
@@ -120,12 +138,16 @@ public class NovaService {
     }
 
     public Map<String, Map<String, Object>> fetchMunicipalities(Map<String, Object> stateCtx) throws IOException, InterruptedException {
-        Session session = newSession();
-        init(session);
+        ensureInitialized();
 
         String region = encode((String) stateCtx.get("region"));
         HttpRequest req = buildApiReq(MUNICIPALITIES_API + "?region=" + region).GET().build();
-        HttpResponse<String> resp = session.httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+        if (resp.statusCode() == 403 || resp.statusCode() == 302) {
+            resetSession();
+            ensureInitialized();
+            resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+        }
         
         if (resp.statusCode() != 200) throw new IOException("Nova municipalities error: " + resp.statusCode());
 
@@ -143,8 +165,7 @@ public class NovaService {
     }
 
     public Map<String, Map<String, Object>> fetchStreets(Map<String, Object> stateCtx, Map<String, Object> munCtx) throws IOException, InterruptedException {
-        Session session = newSession();
-        init(session);
+        ensureInitialized();
 
         String region = encode((String) stateCtx.get("region"));
         String municipality = encode((String) munCtx.get("municipality"));
@@ -158,7 +179,12 @@ public class NovaService {
                 try {
                     String url = STREETS_API + encode(letter) + "?region=" + region + "&municipality=" + municipality;
                     HttpRequest req = buildApiReq(url).GET().build();
-                    HttpResponse<String> resp = session.httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+                    HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+                    if (resp.statusCode() == 403 || resp.statusCode() == 302) {
+                        resetSession();
+                        ensureInitialized();
+                        resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+                    }
 
                     if (resp.statusCode() == 200) {
                         Map<String, Object> data = objectMapper.readValue(resp.body(), new TypeReference<>() {});
@@ -190,19 +216,37 @@ public class NovaService {
             Map<String, Object> munCtx,
             Map<String, Object> streetCtx,
             String streetNumber) throws IOException, InterruptedException {
-            
-        Session session = newSession();
-        init(session);
+        ensureInitialized();
 
         Map<String, Object> payload = buildAvailabilityPayload(stateCtx, munCtx, streetCtx, streetNumber);
         String jsonBody = objectMapper.writeValueAsString(payload);
 
-        HttpRequest req = buildApiReq(AVAIL_API)
+        HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(AVAIL_API))
+                //.timeout(Duration.ofSeconds(30))
+                .header("User-Agent", USER_AGENT)
+                .header("Accept", "application/json, text/plain, */*")
+                .header("Accept-Language", "el")
+                .header("Priority", "u=1, i")
+                .header("Referer", "https://nova.gr/statheri-tilefonia/programmata/stathero-internet")
+                .header("sec-ch-ua", "\"Google Chrome\";v=\"147\", \"Not.A/Brand\";v=\"8\", \"Chromium\";v=\"147\"")
+                .header("sec-ch-ua-mobile", "?0")
+                .header("sec-ch-ua-platform", "\"Windows\"")
+                .header("sec-fetch-dest", "empty")
+                .header("sec-fetch-mode", "cors")
+                .header("sec-fetch-site", "same-origin")
                 .header("Content-Type", "application/json")
+                .header("X-Requested-With", "XMLHttpRequest")
                 .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
                 .build();
 
-        HttpResponse<String> resp = session.httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+        if (resp.statusCode() == 403 || resp.statusCode() == 302) {
+            LOG.warn("[Nova] Got {} response, resetting session", resp.statusCode());
+            resetSession();
+            ensureInitialized();
+            resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+        }
         if (resp.statusCode() != 200) {
             throw new IOException("Nova availability check error: HTTP " + resp.statusCode());
         }
@@ -323,11 +367,22 @@ public class NovaService {
                 }
                 
                 // Final fallback if the map didn't contain the upload speed
-                if (maxDl != null && maxUl == null) {
-                    maxUl = maxDl / 10.0; // Typical rate
-                }
+                    if (maxDl != null && maxUl == null) {
+                        maxUl = maxDl / 10.0; // Typical rate
+                    }
+
+                    // If we couldn't determine a reasonable download speed, skip this package.
+                    // This filters out mobile/5G offers (e.g. "5G Home Internet") and other non-fixed products
+                    if (maxDl == null) {
+                        LOG.debug("[Nova] Skipping package without parsed speed: {}", title);
+                        continue;
+                    }
                 
-                plans.add(new Plan("NOVA", title, maxDl, maxUl));
+                PlanMetadata meta = PlanCatalog.lookup("NOVA", title);
+                String resolvedName = meta != null ? meta.name() : title;
+                Double price = meta != null ? meta.price() : null;
+                List<String> description = meta != null ? meta.description() : List.of();
+                plans.add(new Plan("NOVA", resolvedName, maxDl, maxUl, price, description));
             }
         }
         return plans;
