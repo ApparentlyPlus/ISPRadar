@@ -1,6 +1,7 @@
 package com.ispradar.backend.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ispradar.backend.config.CosmoteConfig;
 import com.ispradar.backend.dto.Plan;
 import com.ispradar.backend.service.PlanCatalog.PlanMetadata;
 import com.ispradar.backend.util.http.BaseIspHttpClient;
@@ -28,11 +29,6 @@ import java.util.stream.Collectors;
 
 @Service
 public class CosmoteService extends BaseIspHttpClient {
-    private static final String BASE = "https://www.cosmote.gr";
-    private static final String START_URL = BASE + "/eshop/jsp/diathesimotita-adsl-vdsl-cosmotetv.jsp?ct=res";
-    private static final String DROP_API = BASE + "/eshop/global/gadgets/populateAddressDetailsV3.jsp";
-    private static final String AVAIL_API = BASE + "/eshop/jsp/ajax/avdslavailabilityAjaxV2.jsp";
-    private static final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
     private static final Map<String, String> STATES;
     static {
@@ -109,9 +105,9 @@ public class CosmoteService extends BaseIspHttpClient {
     @Override
     protected HttpRequest buildInit() {
         return HttpRequest.newBuilder()
-                .uri(URI.create(START_URL))
+                .uri(URI.create(CosmoteConfig.START_URL))
                 .timeout(Duration.ofSeconds(10))
-                .header("User-Agent", USER_AGENT)
+                .header("User-Agent", CosmoteConfig.USER_AGENT)
                 .header("Accept", "text/html,application/xhtml+xml,*/*")
                 .header("Accept-Language", "en-US,en;q=0.9,el;q=0.8")
                 .header("X-Requested-With", "XMLHttpRequest")
@@ -124,7 +120,7 @@ public class CosmoteService extends BaseIspHttpClient {
         return HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .timeout(Duration.ofSeconds(10))
-                .header("User-Agent", USER_AGENT)
+                .header("User-Agent", CosmoteConfig.USER_AGENT)
                 .header("Accept", "text/html,application/xhtml+xml,*/*")
                 .header("Accept-Language", "en-US,en;q=0.9,el;q=0.8")
                 .header("X-Requested-With", "XMLHttpRequest")
@@ -137,7 +133,7 @@ public class CosmoteService extends BaseIspHttpClient {
         return HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .timeout(Duration.ofSeconds(15))
-                .header("User-Agent", USER_AGENT)
+                .header("User-Agent", CosmoteConfig.USER_AGENT)
                 .header("Accept-Language", "en-US,en;q=0.9,el;q=0.8")
                 .header("X-Requested-With", "XMLHttpRequest")
                 .header("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
@@ -146,7 +142,7 @@ public class CosmoteService extends BaseIspHttpClient {
     }
 
     private String buildDropUrl(Map<String, String> params) {
-        StringBuilder sb = new StringBuilder(DROP_API).append("?");
+        StringBuilder sb = new StringBuilder(CosmoteConfig.DROP_API).append("?");
         params.forEach((k, v) -> {
             String enc = URLEncoder.encode(v, StandardCharsets.UTF_8)
                     .replace("%28", "(")
@@ -253,7 +249,7 @@ public class CosmoteService extends BaseIspHttpClient {
                         + "=" + URLEncoder.encode(e.getValue(), StandardCharsets.UTF_8))
                 .collect(Collectors.joining("&"));
 
-        HttpRequest req = buildPost(AVAIL_API, body);
+        HttpRequest req = buildPost(CosmoteConfig.AVAIL_API, body);
         HttpResponse<String> resp = executeWithRetry(req);
         return parseCosmotePlans(resp.body());
     }
