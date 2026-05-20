@@ -12,6 +12,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -62,8 +63,8 @@ public abstract class BaseIspHttpClient {
             ensureInitialized();
             response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         }
-        
-        if (!HttpStatusCode.isSuccess(response.statusCode())) {
+
+        if (!HttpStatusCode.isSuccess(response.statusCode()) && response.statusCode() != HttpStatusCode.NOT_FOUND.code()) {
             throw new IOException(String.format("[%s] API error: HTTP %d for %s", 
                     getProviderName(), response.statusCode(), request.uri()));
         }
