@@ -70,6 +70,10 @@ public abstract class BaseIspHttpClient {
         return response;
     }
 
+    protected abstract HttpRequest buildInit();
+    protected abstract HttpRequest buildGet(String url);
+    protected abstract HttpRequest buildPost(String url, String jsonPayload);
+
     protected abstract void initializeSession() throws IOException, InterruptedException;
     protected abstract String getProviderName();
 }

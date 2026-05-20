@@ -13,11 +13,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.net.CookieManager;
-import java.net.CookiePolicy;
 import java.net.URI;
 import java.net.URLEncoder;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
@@ -56,12 +53,13 @@ public class VodafoneService extends BaseIspHttpClient {
 
     @Override
     protected void initializeSession() throws IOException, InterruptedException {
-        HttpResponse<String> r = httpClient.send(buildHomeRequest(), HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> r = httpClient.send(buildInit(), HttpResponse.BodyHandlers.ofString());
         if (HttpStatusCode.isError(r.statusCode()))
             throw new IOException("Vodafone session init failed");
     }
 
-    private HttpRequest buildHomeRequest() {
+    @Override
+    protected HttpRequest buildInit() {
         return HttpRequest.newBuilder()
                 .uri(URI.create(HOME))
                 .timeout(Duration.ofSeconds(15))
@@ -72,23 +70,11 @@ public class VodafoneService extends BaseIspHttpClient {
                 .GET()
                 .build();
     }
-
-    private URI buildGeoUri(Map<String, String> params) {
-        StringBuilder sb = new StringBuilder(GEO_API).append("?");
-        boolean first = true;
-        for (Map.Entry<String, String> e : params.entrySet()) {
-            if (!first) sb.append("&");
-            first = false;
-            sb.append(URLEncoder.encode(e.getKey(), StandardCharsets.UTF_8));
-            sb.append("=");
-            sb.append(URLEncoder.encode(e.getValue(), StandardCharsets.UTF_8));
-        }
-        return URI.create(sb.toString());
-    }
-
-    private HttpRequest buildApiGet(URI uri) {
+    
+    @Override
+    protected HttpRequest buildGet(String url) {
         return HttpRequest.newBuilder()
-                .uri(uri)
+                .uri(URI.create(url))
                 .timeout(Duration.ofSeconds(10))
                 .header("User-Agent", USER_AGENT)
                 .header("Accept", "application/json, text/plain, */*")
@@ -100,9 +86,10 @@ public class VodafoneService extends BaseIspHttpClient {
                 .build();
     }
 
-    private HttpRequest buildApiPost(URI uri, String jsonPayload) {
+    @Override
+    protected HttpRequest buildPost(String url, String jsonPayload) {
         return HttpRequest.newBuilder()
-                .uri(uri)
+                .uri(URI.create(url))
                 .header("User-Agent", USER_AGENT)
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json, */*")
@@ -112,10 +99,23 @@ public class VodafoneService extends BaseIspHttpClient {
                 .build();
     }
 
+    private String buildGeoUri(Map<String, String> params) {
+        StringBuilder sb = new StringBuilder(GEO_API).append("?");
+        boolean first = true;
+        for (Map.Entry<String, String> e : params.entrySet()) {
+            if (!first) sb.append("&");
+            first = false;
+            sb.append(URLEncoder.encode(e.getKey(), StandardCharsets.UTF_8));
+            sb.append("=");
+            sb.append(URLEncoder.encode(e.getValue(), StandardCharsets.UTF_8));
+        }
+        return sb.toString();
+    }
+
     private Map<String, Map<String, Object>> fetchOptions(Map<String, String> params)
             throws IOException, InterruptedException {
-        URI uri = buildGeoUri(params);
-        HttpResponse<String> resp = executeWithRetry(buildApiGet(uri));
+        String uri = buildGeoUri(params);
+        HttpResponse<String> resp = executeWithRetry(buildGet(uri));
 
         if (resp.statusCode() == HttpStatusCode.NOT_FOUND.code()) 
             return Collections.emptyMap();
@@ -180,8 +180,7 @@ public class VodafoneService extends BaseIspHttpClient {
             Map<String, Object> streetCtx,
             Map<String, Object> numberCtx) throws IOException, InterruptedException {
         String json = buildCheckPayload(stateCtx, cityCtx, postalCtx, streetCtx, numberCtx, null);
-        URI availabilityUri = URI.create(AVAIL_API);
-        HttpRequest req = buildApiPost(availabilityUri, json);
+        HttpRequest req = buildPost(AVAIL_API, json);
         HttpResponse<String> resp = executeWithRetry(req);
 
         Map<String, Object> data = objectMapper.readValue(resp.body(), new TypeReference<>() {});
@@ -189,7 +188,7 @@ public class VodafoneService extends BaseIspHttpClient {
             LOG.info("[Vodafone] Floor dropdown required");
             Map<String, Object> floor = Map.of("label", "Ισόγειο", "value", "O00");
             String retryJson = buildCheckPayload(stateCtx, cityCtx, postalCtx, streetCtx, numberCtx, floor);
-            req = buildApiPost(availabilityUri, retryJson);
+            req = buildPost(AVAIL_API, retryJson);
             resp = executeWithRetry(req);
             data = objectMapper.readValue(resp.body(), new TypeReference<>() {});
         }

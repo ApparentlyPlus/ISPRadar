@@ -53,18 +53,24 @@ public class NovaService extends BaseIspHttpClient {
 
     @Override
     protected void initializeSession() throws IOException, InterruptedException {
-        HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(INIT_URL))
-                .header("User-Agent", USER_AGENT)
-                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-                .GET()
-                .build();
+        HttpRequest req = buildInit();
         HttpResponse<String> r = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
         if (HttpStatusCode.isError(r.statusCode())) 
             throw new IOException("Session init failed: HTTP " + r.statusCode());
     }
 
-    private HttpRequest.Builder buildApiReq(String url) {
+    @Override
+    protected HttpRequest buildInit() {
+        return HttpRequest.newBuilder()
+                .uri(URI.create(INIT_URL))
+                .header("User-Agent", USER_AGENT)
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .GET()
+                .build();
+    }
+
+    @Override
+    protected HttpRequest buildGet(String url) {
         return HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .timeout(Duration.ofSeconds(15))
@@ -79,11 +85,34 @@ public class NovaService extends BaseIspHttpClient {
                 .header("sec-fetch-dest", "empty")
                 .header("sec-fetch-mode", "cors")
                 .header("sec-fetch-site", "same-origin")
-                .header("X-Requested-With", "XMLHttpRequest");
+                .header("X-Requested-With", "XMLHttpRequest")
+                .GET()
+                .build();
+    }
+
+    @Override
+    protected HttpRequest buildPost(String url, String jsonPayload) {
+        return HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("User-Agent", USER_AGENT)
+                .header("Accept", "application/json, text/plain, */*")
+                .header("Accept-Language", "el")
+                .header("Priority", "u=1, i")
+                .header("Referer", INIT_URL)
+                .header("sec-ch-ua", "\"Google Chrome\";v=\"147\", \"Not.A/Brand\";v=\"8\", \"Chromium\";v=\"147\"")
+                .header("sec-ch-ua-mobile", "?0")
+                .header("sec-ch-ua-platform", "\"Windows\"")
+                .header("sec-fetch-dest", "empty")
+                .header("sec-fetch-mode", "cors")
+                .header("sec-fetch-site", "same-origin")
+                .header("Content-Type", "application/json")
+                .header("X-Requested-With", "XMLHttpRequest")
+                .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
+                .build();
     }
 
     public Map<String, Map<String, Object>> fetchStates() throws IOException, InterruptedException {
-        HttpRequest req = buildApiReq(REGIONS_API).GET().build();
+        HttpRequest req = buildGet(REGIONS_API);
         HttpResponse<String> resp = executeWithRetry(req);
 
         Map<String, Object> data = objectMapper.readValue(resp.body(), new TypeReference<>() {});
@@ -98,7 +127,7 @@ public class NovaService extends BaseIspHttpClient {
 
     public Map<String, Map<String, Object>> fetchMunicipalities(Map<String, Object> stateCtx) throws IOException, InterruptedException {
         String region = encode((String) stateCtx.get("region"));
-        HttpRequest req = buildApiReq(MUNICIPALITIES_API + "?region=" + region).GET().build();
+        HttpRequest req = buildGet(MUNICIPALITIES_API + "?region=" + region);
         HttpResponse<String> resp = executeWithRetry(req);
 
         Map<String, Object> data = objectMapper.readValue(resp.body(), new TypeReference<>() {});
@@ -122,7 +151,7 @@ public class NovaService extends BaseIspHttpClient {
         var futures = GREEK_ALPHABET.stream().map(letter -> CompletableFuture.runAsync(() -> {
             try {
                 String url = STREETS_API + encode(letter) + "?region=" + region + "&municipality=" + municipality;
-                var req = buildApiReq(url).GET().build();
+                var req = buildGet(url);
                 var resp = executeWithRetry(req);
                 extractResultsListOfMaps(resp.body()).forEach(s -> {
                     String streetName = (String) s.get("street");
@@ -147,27 +176,11 @@ public class NovaService extends BaseIspHttpClient {
             Map<String, Object> munCtx,
             Map<String, Object> streetCtx,
             String streetNumber) throws IOException, InterruptedException {
+        
         Map<String, Object> payload = buildAvailabilityPayload(stateCtx, munCtx, streetCtx, streetNumber);
         String jsonBody = objectMapper.writeValueAsString(payload);
 
-        HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(AVAIL_API))
-                .header("User-Agent", USER_AGENT)
-                .header("Accept", "application/json, text/plain, */*")
-                .header("Accept-Language", "el")
-                .header("Priority", "u=1, i")
-                .header("Referer", "https://nova.gr/statheri-tilefonia/programmata/stathero-internet")
-                .header("sec-ch-ua", "\"Google Chrome\";v=\"147\", \"Not.A/Brand\";v=\"8\", \"Chromium\";v=\"147\"")
-                .header("sec-ch-ua-mobile", "?0")
-                .header("sec-ch-ua-platform", "\"Windows\"")
-                .header("sec-fetch-dest", "empty")
-                .header("sec-fetch-mode", "cors")
-                .header("sec-fetch-site", "same-origin")
-                .header("Content-Type", "application/json")
-                .header("X-Requested-With", "XMLHttpRequest")
-                .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
-                .build();
-
+        HttpRequest req = buildPost(AVAIL_API, jsonBody);
         HttpResponse<String> resp = executeWithRetry(req);
  
         Map<String, Object> data = objectMapper.readValue(resp.body(), new TypeReference<>() {});

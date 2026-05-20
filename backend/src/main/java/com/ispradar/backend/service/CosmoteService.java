@@ -100,21 +100,48 @@ public class CosmoteService extends BaseIspHttpClient {
 
     @Override
     protected void initializeSession() throws IOException, InterruptedException {
-        var request = buildGet(START_URL, "text/html,application/xhtml+xml,*/*");
+        var request = buildInit();
         HttpResponse<String> r = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         if (HttpStatusCode.isError(r.statusCode())) 
             throw new IOException("Session init failed: HTTP " + r.statusCode());
     }
 
-    private HttpRequest buildGet(String url, String accept) {
+    @Override
+    protected HttpRequest buildInit() {
+        return HttpRequest.newBuilder()
+                .uri(URI.create(START_URL))
+                .timeout(Duration.ofSeconds(10))
+                .header("User-Agent", USER_AGENT)
+                .header("Accept", "text/html,application/xhtml+xml,*/*")
+                .header("Accept-Language", "en-US,en;q=0.9,el;q=0.8")
+                .header("X-Requested-With", "XMLHttpRequest")
+                .GET()
+                .build();
+    }
+
+    @Override
+    protected HttpRequest buildGet(String url) {
         return HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .timeout(Duration.ofSeconds(10))
                 .header("User-Agent", USER_AGENT)
-                .header("Accept", accept)
+                .header("Accept", "text/html,application/xhtml+xml,*/*")
                 .header("Accept-Language", "en-US,en;q=0.9,el;q=0.8")
                 .header("X-Requested-With", "XMLHttpRequest")
                 .GET()
+                .build();
+    }
+
+    @Override
+    protected HttpRequest buildPost(String url, String jsonPayload){
+        return HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofSeconds(15))
+                .header("User-Agent", USER_AGENT)
+                .header("Accept-Language", "en-US,en;q=0.9,el;q=0.8")
+                .header("X-Requested-With", "XMLHttpRequest")
+                .header("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+                .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
                 .build();
     }
 
@@ -133,7 +160,7 @@ public class CosmoteService extends BaseIspHttpClient {
     private Map<String, String> fetchOptions(Map<String, String> params)
             throws IOException, InterruptedException {
         String url = buildDropUrl(params);
-        HttpResponse<String> resp = executeWithRetry(buildGet(url, "text/html,application/xhtml+xml,*/*"));
+        HttpResponse<String> resp = executeWithRetry(buildGet(url));
         return parseHtmlOptions(resp.body());
     }
 
@@ -226,16 +253,7 @@ public class CosmoteService extends BaseIspHttpClient {
                         + "=" + URLEncoder.encode(e.getValue(), StandardCharsets.UTF_8))
                 .collect(Collectors.joining("&"));
 
-        HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(AVAIL_API))
-                .timeout(Duration.ofSeconds(15))
-                .header("User-Agent", USER_AGENT)
-                .header("Accept-Language", "en-US,en;q=0.9,el;q=0.8")
-                .header("X-Requested-With", "XMLHttpRequest")
-                .header("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
-                .POST(HttpRequest.BodyPublishers.ofString(body))
-                .build();
-
+        HttpRequest req = buildPost(AVAIL_API, body);
         HttpResponse<String> resp = executeWithRetry(req);
         return parseCosmotePlans(resp.body());
     }
