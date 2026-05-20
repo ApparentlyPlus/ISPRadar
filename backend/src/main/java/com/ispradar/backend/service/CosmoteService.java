@@ -1,21 +1,19 @@
 package com.ispradar.backend.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ispradar.backend.dto.Plan;
 import com.ispradar.backend.service.PlanCatalog.PlanMetadata;
-import com.ispradar.backend.enums.http.HttpStatusCode;
+import com.ispradar.backend.util.http.BaseIspHttpClient;
+import com.ispradar.backend.util.http.HttpStatusCode;
+
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.net.CookieManager;
-import java.net.CookiePolicy;
 import java.net.URI;
 import java.net.URLEncoder;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
@@ -29,10 +27,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
-public class CosmoteService {
-
-    private static final Logger LOG = LoggerFactory.getLogger(CosmoteService.class);
-
+public class CosmoteService extends BaseIspHttpClient {
     private static final String BASE = "https://www.cosmote.gr";
     private static final String START_URL = BASE + "/eshop/jsp/diathesimotita-adsl-vdsl-cosmotetv.jsp?ct=res";
     private static final String DROP_API = BASE + "/eshop/global/gadgets/populateAddressDetailsV3.jsp";
@@ -96,39 +91,19 @@ public class CosmoteService {
         STATES.put("ΧΙΟΥ", "47");
     }
 
-    private final CookieManager cookieManager;
-    private final HttpClient httpClient;
-    private final Object initLock = new Object();
-    private volatile boolean initialized;
-
-    public CosmoteService() {
-        this.cookieManager = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
-        this.httpClient = HttpClient.newBuilder()
-                .cookieHandler(cookieManager)
-                .followRedirects(HttpClient.Redirect.NORMAL)
-                .connectTimeout(Duration.ofSeconds(15))
-                .build();
-        this.initialized = false;
+    public CosmoteService(ObjectMapper objectMapper) {
+        super(objectMapper);
     }
 
-    private void ensureInitialized() throws IOException, InterruptedException {
-        if (initialized) return;
-        synchronized (initLock) {
-            if (initialized) return;
-            LOG.info("[Cosmote] Initialising session...");
-            HttpResponse<String> r = httpClient.send(
-                    buildGet(START_URL, "text/html,application/xhtml+xml,*/*"),
-                    HttpResponse.BodyHandlers.ofString());
-            if (!HttpStatusCode.isSuccess(r.statusCode())) {
-                throw new IOException("Cosmote session init failed: HTTP " + r.statusCode());
-            }
-            initialized = true;
-        }
-    }
+    @Override
+    protected String getProviderName() { return "Cosmote"; }
 
-    private void resetSession() {
-        cookieManager.getCookieStore().removeAll();
-        initialized = false;
+    @Override
+    protected void initializeSession() throws IOException, InterruptedException {
+        var request = buildGet(START_URL, "text/html,application/xhtml+xml,*/*");
+        HttpResponse<String> r = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (HttpStatusCode.isError(r.statusCode())) 
+            throw new IOException("Session init failed: HTTP " + r.statusCode());
     }
 
     private HttpRequest buildGet(String url, String accept) {
@@ -157,22 +132,8 @@ public class CosmoteService {
 
     private Map<String, String> fetchOptions(Map<String, String> params)
             throws IOException, InterruptedException {
-        ensureInitialized();
         String url = buildDropUrl(params);
-        HttpResponse<String> resp = httpClient.send(
-                buildGet(url, "text/html,application/xhtml+xml,*/*"),
-                HttpResponse.BodyHandlers.ofString());
-
-        if (HttpStatusCode.requiresSessionReset(resp.statusCode())) {
-            resetSession();
-            ensureInitialized();
-            resp = httpClient.send(
-                    buildGet(buildDropUrl(params), "text/html,application/xhtml+xml,*/*"),
-                    HttpResponse.BodyHandlers.ofString());
-        }
-        if (!HttpStatusCode.isSuccess(resp.statusCode())) {
-            throw new IOException("Cosmote dropdown error: HTTP " + resp.statusCode());
-        }
+        HttpResponse<String> resp = executeWithRetry(buildGet(url, "text/html,application/xhtml+xml,*/*"));
         return parseHtmlOptions(resp.body());
     }
 
@@ -275,15 +236,7 @@ public class CosmoteService {
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build();
 
-        HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
-        if (HttpStatusCode.requiresSessionReset(resp.statusCode())) {
-            resetSession();
-            ensureInitialized();
-            resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
-        }
-        if (!HttpStatusCode.isSuccess(resp.statusCode())) {
-            throw new IOException("Cosmote availability error: HTTP " + resp.statusCode());
-        }
+        HttpResponse<String> resp = executeWithRetry(req);
         return parseCosmotePlans(resp.body());
     }
 

@@ -1,4 +1,4 @@
-package com.ispradar.backend.enums.http;
+package com.ispradar.backend.util.http;
 
 import java.util.Set;
 
