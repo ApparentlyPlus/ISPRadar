@@ -4,8 +4,10 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ispradar.backend.dto.Plan;
 import com.ispradar.backend.service.PlanCatalog.PlanMetadata;
+import com.ispradar.backend.enums.http.HttpStatusCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -66,7 +68,7 @@ public class VodafoneService {
             if (initialized) return;
             LOG.info("[Vodafone] Initialising session...");
             HttpResponse<String> r = httpClient.send(buildHomeRequest(), HttpResponse.BodyHandlers.ofString());
-            if (r.statusCode() >= 400) {
+            if (HttpStatusCode.isError(r.statusCode())) {
                 throw new IOException("Vodafone session init failed: HTTP " + r.statusCode());
             }
             initialized = true;
@@ -123,13 +125,14 @@ public class VodafoneService {
         URI uri = buildGeoUri(params);
         HttpResponse<String> resp = httpClient.send(buildApiGet(uri), HttpResponse.BodyHandlers.ofString());
 
-        if (resp.statusCode() == 404) return Collections.emptyMap();
-        if (resp.statusCode() == 403 || resp.statusCode() == 302) {
+        if (resp.statusCode() == HttpStatusCode.NOT_FOUND.code()) 
+            return Collections.emptyMap();
+        if (HttpStatusCode.requiresSessionReset(resp.statusCode())) {
             resetSession();
             ensureInitialized();
             resp = httpClient.send(buildApiGet(uri), HttpResponse.BodyHandlers.ofString());
         }
-        if (resp.statusCode() != 200) {
+        if (!HttpStatusCode.isSuccess(resp.statusCode())) {
             throw new IOException("Vodafone geo API error: HTTP " + resp.statusCode());
         }
 
@@ -197,7 +200,7 @@ public class VodafoneService {
         String json = buildCheckPayload(stateCtx, cityCtx, postalCtx, streetCtx, numberCtx, null);
         HttpResponse<String> resp = sendCheckRequest(json);
 
-        if (resp.statusCode() == 403 || resp.statusCode() == 302) {
+        if (HttpStatusCode.requiresSessionReset(resp.statusCode())) {
             resetSession();
             ensureInitialized();
             resp = sendCheckRequest(json);

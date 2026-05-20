@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ispradar.backend.dto.Plan;
 import com.ispradar.backend.service.PlanCatalog.PlanMetadata;
+import com.ispradar.backend.enums.http.HttpStatusCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -84,7 +85,7 @@ public class NovaService {
 
             HttpResponse<String> r = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
             LOG.debug("[Nova] Session init status: {}, cookies: {}", r.statusCode(), cookieManager.getCookieStore().getCookies());
-            if (r.statusCode() >= 400) {
+            if (HttpStatusCode.isError(r.statusCode())) {
                 throw new IOException("Nova session init failed: HTTP " + r.statusCode());
             }
             initialized = true;
@@ -119,13 +120,14 @@ public class NovaService {
 
         HttpRequest req = buildApiReq(REGIONS_API).GET().build();
         HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
-        if (resp.statusCode() == 403 || resp.statusCode() == 302) {
+        if (HttpStatusCode.requiresSessionReset(resp.statusCode())) {
             resetSession();
             ensureInitialized();
             resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
         }
         
-        if (resp.statusCode() != 200) throw new IOException("Nova states error: " + resp.statusCode());
+        if (!HttpStatusCode.isSuccess(resp.statusCode())) 
+            throw new IOException("Nova states error: " + resp.statusCode());
 
         Map<String, Object> data = objectMapper.readValue(resp.body(), new TypeReference<>() {});
         List<String> results = extractResultsList(data);
@@ -143,13 +145,14 @@ public class NovaService {
         String region = encode((String) stateCtx.get("region"));
         HttpRequest req = buildApiReq(MUNICIPALITIES_API + "?region=" + region).GET().build();
         HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
-        if (resp.statusCode() == 403 || resp.statusCode() == 302) {
+        if (HttpStatusCode.requiresSessionReset(resp.statusCode())) {
             resetSession();
             ensureInitialized();
             resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
         }
         
-        if (resp.statusCode() != 200) throw new IOException("Nova municipalities error: " + resp.statusCode());
+        if (!HttpStatusCode.isSuccess(resp.statusCode())) 
+            throw new IOException("Nova municipalities error: " + resp.statusCode());
 
         Map<String, Object> data = objectMapper.readValue(resp.body(), new TypeReference<>() {});
         List<String> results = extractResultsList(data);
@@ -180,13 +183,13 @@ public class NovaService {
                     String url = STREETS_API + encode(letter) + "?region=" + region + "&municipality=" + municipality;
                     HttpRequest req = buildApiReq(url).GET().build();
                     HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
-                    if (resp.statusCode() == 403 || resp.statusCode() == 302) {
+                    if (HttpStatusCode.requiresSessionReset(resp.statusCode())) {
                         resetSession();
                         ensureInitialized();
                         resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
                     }
 
-                    if (resp.statusCode() == 200) {
+                    if (HttpStatusCode.isSuccess(resp.statusCode())) {
                         Map<String, Object> data = objectMapper.readValue(resp.body(), new TypeReference<>() {});
                         List<Map<String, Object>> results = extractResultsListOfMaps(data);
                         for (Map<String, Object> s : results) {
@@ -241,13 +244,13 @@ public class NovaService {
                 .build();
 
         HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
-        if (resp.statusCode() == 403 || resp.statusCode() == 302) {
+        if (HttpStatusCode.requiresSessionReset(resp.statusCode())) {
             LOG.warn("[Nova] Got {} response, resetting session", resp.statusCode());
             resetSession();
             ensureInitialized();
             resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
         }
-        if (resp.statusCode() != 200) {
+        if (!HttpStatusCode.isSuccess(resp.statusCode())) {
             throw new IOException("Nova availability check error: HTTP " + resp.statusCode());
         }
 

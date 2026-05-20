@@ -2,6 +2,7 @@ package com.ispradar.backend.service;
 
 import com.ispradar.backend.dto.Plan;
 import com.ispradar.backend.service.PlanCatalog.PlanMetadata;
+import com.ispradar.backend.enums.http.HttpStatusCode;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -118,7 +119,7 @@ public class CosmoteService {
             HttpResponse<String> r = httpClient.send(
                     buildGet(START_URL, "text/html,application/xhtml+xml,*/*"),
                     HttpResponse.BodyHandlers.ofString());
-            if (r.statusCode() != 200) {
+            if (!HttpStatusCode.isSuccess(r.statusCode())) {
                 throw new IOException("Cosmote session init failed: HTTP " + r.statusCode());
             }
             initialized = true;
@@ -162,14 +163,14 @@ public class CosmoteService {
                 buildGet(url, "text/html,application/xhtml+xml,*/*"),
                 HttpResponse.BodyHandlers.ofString());
 
-        if (resp.statusCode() == 403 || resp.statusCode() == 302) {
+        if (HttpStatusCode.requiresSessionReset(resp.statusCode())) {
             resetSession();
             ensureInitialized();
             resp = httpClient.send(
                     buildGet(buildDropUrl(params), "text/html,application/xhtml+xml,*/*"),
                     HttpResponse.BodyHandlers.ofString());
         }
-        if (resp.statusCode() != 200) {
+        if (!HttpStatusCode.isSuccess(resp.statusCode())) {
             throw new IOException("Cosmote dropdown error: HTTP " + resp.statusCode());
         }
         return parseHtmlOptions(resp.body());
@@ -275,12 +276,12 @@ public class CosmoteService {
                 .build();
 
         HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
-        if (resp.statusCode() == 403 || resp.statusCode() == 302) {
+        if (HttpStatusCode.requiresSessionReset(resp.statusCode())) {
             resetSession();
             ensureInitialized();
             resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
         }
-        if (resp.statusCode() != 200) {
+        if (!HttpStatusCode.isSuccess(resp.statusCode())) {
             throw new IOException("Cosmote availability error: HTTP " + resp.statusCode());
         }
         return parseCosmotePlans(resp.body());
