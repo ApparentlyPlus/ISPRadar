@@ -2,6 +2,7 @@ package com.ispradar.backend.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ispradar.backend.config.NovaConfig;
 import com.ispradar.backend.dto.Plan;
 import com.ispradar.backend.service.PlanCatalog.PlanMetadata;
 import com.ispradar.backend.util.http.BaseIspHttpClient;
@@ -29,13 +30,6 @@ public class NovaService extends BaseIspHttpClient {
 
     private static final Logger LOG = LoggerFactory.getLogger(NovaService.class);
 
-    private static final String INIT_URL = "https://nova.gr/statheri-tilefonia/programmata/stathero-internet";
-    private static final String REGIONS_API = "https://nova.gr/api/address/regions";
-    private static final String MUNICIPALITIES_API = "https://nova.gr/api/address/municipalities";
-    private static final String STREETS_API = "https://nova.gr/api/address/streets/";
-    private static final String AVAIL_API = "https://nova.gr/api/GetEligibilityInfo";
-    
-    private static final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36";
     private static final List<String> GREEK_ALPHABET = List.of(
             "Α", "Β", "Γ", "Δ", "Ε", "Ζ", "Η", "Θ", "Ι", "Κ", "Λ", "Μ", 
             "Ν", "Ξ", "Ο", "Π", "Ρ", "Σ", "Τ", "Υ", "Φ", "Χ", "Ψ", "Ω"
@@ -62,8 +56,8 @@ public class NovaService extends BaseIspHttpClient {
     @Override
     protected HttpRequest buildInit() {
         return HttpRequest.newBuilder()
-                .uri(URI.create(INIT_URL))
-                .header("User-Agent", USER_AGENT)
+                .uri(URI.create(NovaConfig.INIT_URL))
+                .header("User-Agent", NovaConfig.USER_AGENT)
                 .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 .GET()
                 .build();
@@ -74,11 +68,11 @@ public class NovaService extends BaseIspHttpClient {
         return HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .timeout(Duration.ofSeconds(15))
-                .header("User-Agent", USER_AGENT)
+                .header("User-Agent", NovaConfig.USER_AGENT)
                 .header("Accept", "application/json, text/plain, */*")
                 .header("Accept-Language", "el")
                 .header("Priority", "u=1, i")
-                .header("Referer", INIT_URL)
+                .header("Referer", NovaConfig.INIT_URL)
                 .header("sec-ch-ua", "\"Google Chrome\";v=\"147\", \"Not.A/Brand\";v=\"8\", \"Chromium\";v=\"147\"")
                 .header("sec-ch-ua-mobile", "?0")
                 .header("sec-ch-ua-platform", "\"Windows\"")
@@ -94,11 +88,11 @@ public class NovaService extends BaseIspHttpClient {
     protected HttpRequest buildPost(String url, String jsonPayload) {
         return HttpRequest.newBuilder()
                 .uri(URI.create(url))
-                .header("User-Agent", USER_AGENT)
+                .header("User-Agent", NovaConfig.USER_AGENT)
                 .header("Accept", "application/json, text/plain, */*")
                 .header("Accept-Language", "el")
                 .header("Priority", "u=1, i")
-                .header("Referer", INIT_URL)
+                .header("Referer", NovaConfig.INIT_URL)
                 .header("sec-ch-ua", "\"Google Chrome\";v=\"147\", \"Not.A/Brand\";v=\"8\", \"Chromium\";v=\"147\"")
                 .header("sec-ch-ua-mobile", "?0")
                 .header("sec-ch-ua-platform", "\"Windows\"")
@@ -112,7 +106,7 @@ public class NovaService extends BaseIspHttpClient {
     }
 
     public Map<String, Map<String, Object>> fetchStates() throws IOException, InterruptedException {
-        HttpRequest req = buildGet(REGIONS_API);
+        HttpRequest req = buildGet(NovaConfig.REGIONS_API);
         HttpResponse<String> resp = executeWithRetry(req);
 
         Map<String, Object> data = objectMapper.readValue(resp.body(), new TypeReference<>() {});
@@ -127,7 +121,7 @@ public class NovaService extends BaseIspHttpClient {
 
     public Map<String, Map<String, Object>> fetchMunicipalities(Map<String, Object> stateCtx) throws IOException, InterruptedException {
         String region = encode((String) stateCtx.get("region"));
-        HttpRequest req = buildGet(MUNICIPALITIES_API + "?region=" + region);
+        HttpRequest req = buildGet(NovaConfig.MUNICIPALITIES_API + "?region=" + region);
         HttpResponse<String> resp = executeWithRetry(req);
 
         Map<String, Object> data = objectMapper.readValue(resp.body(), new TypeReference<>() {});
@@ -150,7 +144,7 @@ public class NovaService extends BaseIspHttpClient {
 
         var futures = GREEK_ALPHABET.stream().map(letter -> CompletableFuture.runAsync(() -> {
             try {
-                String url = STREETS_API + encode(letter) + "?region=" + region + "&municipality=" + municipality;
+                String url = NovaConfig.STREETS_API + encode(letter) + "?region=" + region + "&municipality=" + municipality;
                 var req = buildGet(url);
                 var resp = executeWithRetry(req);
                 extractResultsListOfMaps(resp.body()).forEach(s -> {
@@ -180,7 +174,7 @@ public class NovaService extends BaseIspHttpClient {
         Map<String, Object> payload = buildAvailabilityPayload(stateCtx, munCtx, streetCtx, streetNumber);
         String jsonBody = objectMapper.writeValueAsString(payload);
 
-        HttpRequest req = buildPost(AVAIL_API, jsonBody);
+        HttpRequest req = buildPost(NovaConfig.AVAIL_API, jsonBody);
         HttpResponse<String> resp = executeWithRetry(req);
  
         Map<String, Object> data = objectMapper.readValue(resp.body(), new TypeReference<>() {});

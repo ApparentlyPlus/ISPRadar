@@ -2,6 +2,7 @@ package com.ispradar.backend.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ispradar.backend.config.VodafoneConfig;
 import com.ispradar.backend.dto.Plan;
 import com.ispradar.backend.service.PlanCatalog.PlanMetadata;
 import com.ispradar.backend.util.http.BaseIspHttpClient;
@@ -30,20 +31,6 @@ public class VodafoneService extends BaseIspHttpClient {
 
     private static final Logger LOG = LoggerFactory.getLogger(VodafoneService.class);
 
-    private static final String BASE = "https://www.vodafone.gr";
-    private static final String HOME = BASE + "/statheri-internet-programmata";
-    private static final String GEO_API = BASE + "/api/geographicAddress";
-    private static final String AVAIL_API = BASE + "/api/eligibilityTool/queryServiceQualification";
-    private static final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36";
-
-    private static final String PARAM_STATE = "externalIdentifier[?(externalIdentifierType==\"stateOrProvince\")].id";
-    private static final String PARAM_CITY = "externalIdentifier[?(externalIdentifierType==\"city\")].id";
-    private static final String FIELDS_STATE = "stateOrProvince," + PARAM_STATE;
-    private static final String FIELDS_CITY = "city," + PARAM_CITY;
-    private static final String FIELDS_POSTAL = "postcode";
-    private static final String FIELDS_STREET = "streetName";
-    private static final String FIELDS_NUMBER = "streetNr,streetNrSuffix";
-
     public VodafoneService(ObjectMapper objectMapper) {
         super(objectMapper);
     }
@@ -61,9 +48,9 @@ public class VodafoneService extends BaseIspHttpClient {
     @Override
     protected HttpRequest buildInit() {
         return HttpRequest.newBuilder()
-                .uri(URI.create(HOME))
+                .uri(URI.create(VodafoneConfig.HOME))
                 .timeout(Duration.ofSeconds(15))
-                .header("User-Agent", USER_AGENT)
+                .header("User-Agent", VodafoneConfig.USER_AGENT)
                 .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
                 .header("sec-fetch-mode", "navigate")
                 .header("sec-fetch-site", "none")
@@ -76,12 +63,12 @@ public class VodafoneService extends BaseIspHttpClient {
         return HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .timeout(Duration.ofSeconds(10))
-                .header("User-Agent", USER_AGENT)
+                .header("User-Agent", VodafoneConfig.USER_AGENT)
                 .header("Accept", "application/json, text/plain, */*")
                 .header("sec-fetch-mode", "cors")
                 .header("sec-fetch-site", "same-origin")
                 .header("accept-language", "el")
-                .header("Referer", HOME)
+                .header("Referer", VodafoneConfig.HOME)
                 .GET()
                 .build();
     }
@@ -90,7 +77,7 @@ public class VodafoneService extends BaseIspHttpClient {
     protected HttpRequest buildPost(String url, String jsonPayload) {
         return HttpRequest.newBuilder()
                 .uri(URI.create(url))
-                .header("User-Agent", USER_AGENT)
+                .header("User-Agent", VodafoneConfig.USER_AGENT)
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json, */*")
                 .header("sec-fetch-mode", "cors")
@@ -100,7 +87,7 @@ public class VodafoneService extends BaseIspHttpClient {
     }
 
     private String buildGeoUri(Map<String, String> params) {
-        StringBuilder sb = new StringBuilder(GEO_API).append("?");
+        StringBuilder sb = new StringBuilder(VodafoneConfig.GEO_API).append("?");
         boolean first = true;
         for (Map.Entry<String, String> e : params.entrySet()) {
             if (!first) sb.append("&");
@@ -130,23 +117,23 @@ public class VodafoneService extends BaseIspHttpClient {
     }
 
     public Map<String, Map<String, Object>> fetchStates() throws IOException, InterruptedException {
-        return fetchOptions(Map.of("fields", FIELDS_STATE));
+        return fetchOptions(Map.of("fields", VodafoneConfig.FIELDS_STATE));
     }
 
     public Map<String, Map<String, Object>> fetchCities(Map<String, Object> stateCtx)
             throws IOException, InterruptedException {
     return fetchOptions(Map.of(
-                "fields", FIELDS_CITY,
-                PARAM_STATE, (String) stateCtx.get("value")));
+                "fields", VodafoneConfig.FIELDS_CITY,
+                VodafoneConfig.PARAM_STATE, (String) stateCtx.get("value")));
     }
 
     public Map<String, Map<String, Object>> fetchPostalCodes(
             Map<String, Object> stateCtx,
             Map<String, Object> cityCtx) throws IOException, InterruptedException {
     return fetchOptions(Map.of(
-                "fields", FIELDS_POSTAL,
-                PARAM_STATE, (String) stateCtx.get("value"),
-                PARAM_CITY, (String) cityCtx.get("value")));
+                "fields", VodafoneConfig.FIELDS_POSTAL,
+                VodafoneConfig.PARAM_STATE, (String) stateCtx.get("value"),
+                VodafoneConfig.PARAM_CITY, (String) cityCtx.get("value")));
     }
 
     public Map<String, Map<String, Object>> fetchStreets(
@@ -154,9 +141,9 @@ public class VodafoneService extends BaseIspHttpClient {
             Map<String, Object> cityCtx,
             Map<String, Object> postalCtx) throws IOException, InterruptedException {
     return fetchOptions(Map.of(
-                "fields", FIELDS_STREET,
-                PARAM_STATE, (String) stateCtx.get("value"),
-                PARAM_CITY, (String) cityCtx.get("value"),
+                "fields", VodafoneConfig.FIELDS_STREET,
+                VodafoneConfig.PARAM_STATE, (String) stateCtx.get("value"),
+                VodafoneConfig.PARAM_CITY, (String) cityCtx.get("value"),
                 "postcode", (String) postalCtx.get("value")));
     }
 
@@ -166,9 +153,9 @@ public class VodafoneService extends BaseIspHttpClient {
             Map<String, Object> postalCtx,
             Map<String, Object> streetCtx) throws IOException, InterruptedException {
     return fetchOptions(Map.of(
-                "fields", FIELDS_NUMBER,
-                PARAM_STATE, (String) stateCtx.get("value"),
-                PARAM_CITY, (String) cityCtx.get("value"),
+                "fields", VodafoneConfig.FIELDS_NUMBER,
+                VodafoneConfig.PARAM_STATE, (String) stateCtx.get("value"),
+                VodafoneConfig.PARAM_CITY, (String) cityCtx.get("value"),
                 "postcode", (String) postalCtx.get("value"),
                 "streetName", (String) streetCtx.get("value")));
     }
@@ -180,7 +167,7 @@ public class VodafoneService extends BaseIspHttpClient {
             Map<String, Object> streetCtx,
             Map<String, Object> numberCtx) throws IOException, InterruptedException {
         String json = buildCheckPayload(stateCtx, cityCtx, postalCtx, streetCtx, numberCtx, null);
-        HttpRequest req = buildPost(AVAIL_API, json);
+        HttpRequest req = buildPost(VodafoneConfig.AVAIL_API, json);
         HttpResponse<String> resp = executeWithRetry(req);
 
         Map<String, Object> data = objectMapper.readValue(resp.body(), new TypeReference<>() {});
@@ -188,7 +175,7 @@ public class VodafoneService extends BaseIspHttpClient {
             LOG.info("[Vodafone] Floor dropdown required");
             Map<String, Object> floor = Map.of("label", "Ισόγειο", "value", "O00");
             String retryJson = buildCheckPayload(stateCtx, cityCtx, postalCtx, streetCtx, numberCtx, floor);
-            req = buildPost(AVAIL_API, retryJson);
+            req = buildPost(VodafoneConfig.AVAIL_API, retryJson);
             resp = executeWithRetry(req);
             data = objectMapper.readValue(resp.body(), new TypeReference<>() {});
         }
